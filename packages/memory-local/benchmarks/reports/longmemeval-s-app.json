@@ -1,0 +1,1095 @@
+{
+  "dataset": {
+    "repository": "xiaowu0162/longmemeval-cleaned",
+    "revision": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+    "split": "s",
+    "filename": "longmemeval_s_cleaned.json",
+    "sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "license": "MIT (Hugging Face dataset card)"
+  },
+  "scope": "Retrieval evaluation with distractor sessions",
+  "evaluatedAt": "2026-08-31T15:50:45.964Z",
+  "host": {
+    "node": "v26.7.0",
+    "platform": "win32",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "totalMemoryBytes": 33409261568
+  },
+  "implementation": {
+    "sourceSha256": {
+      "../src/index.ts": "3286783067b0fc4bb81ea3be7a7ec4743d77e9406b6281a1624b4164c7b41b3e",
+      "../src/memory.ts": "76d3475fff589c7d2c4b7bce788475332238048e1a194de4fff599b5b6487ada",
+      "../src/schema.ts": "ee0321c463989b620d10260d1d9f85103727ba2787c69028250a4330dfbf3748",
+      "../src/text.ts": "3a26566c0200ac9cfdfbdc9e025ed592cc53eb7c252ae27d58807cbb2f5bd631",
+      "../src/types.ts": "181a85baa9a04d22740f1086884844c4acb99b7d747fb78cc04f20dcf097eef3",
+      "./run.ts": "f411fee439e11699eeb64e71fd3334534e07f01b1c94d2ce3a041ffc91d70fb0"
+    },
+    "miniSearchVersion": "7.2.0"
+  },
+  "selection": {
+    "totalDatasetQuestions": 500,
+    "offset": 0,
+    "requestedLimit": 500,
+    "selectedQuestions": 500,
+    "scoredQuestions": 470,
+    "excludedAbstentionQuestions": 30
+  },
+  "configuration": {
+    "profile": "app",
+    "chunk": {
+      "maxCharacters": 1200,
+      "overlap": 120
+    },
+    "search": {
+      "limit": 6,
+      "maxCharacters": 4000,
+      "halfLifeDays": 0
+    },
+    "contextMaxCharacters": 4000,
+    "cutoffs": [
+      1,
+      3,
+      6
+    ],
+    "embeddings": false,
+    "storage": "none",
+    "historyRoles": [
+      "user",
+      "assistant"
+    ],
+    "diversityAblation": [
+      0,
+      0.15
+    ]
+  },
+  "methodology": {
+    "unit": "First k chunks, without expansion to complete sessions",
+    "recall": "Macro mean of unique supporting source IDs retrieved / all supporting source IDs",
+    "hit": "Fraction of questions with at least one supporting source ID retrieved",
+    "complete": "Fraction of questions with all supporting source IDs retrieved",
+    "mrr": "Macro mean of reciprocal rank of the first supporting chunk, truncated at k",
+    "turnCaveat": "A hit identifies a labeled source turn. A split chunk can omit the answer span within that turn.",
+    "sessionCaveat": "A hit identifies a supporting session. It does not prove that the returned chunk contains the answer.",
+    "timing": "One in-memory query per method per question after ingestion. Method order alternates. No model, storage, or network time.",
+    "formatting": "The app profile scores only records present after the public context formatter. Formatting time is reported separately. Benchmark source IDs differ from application IDs.",
+    "abstention": "Excluded from evidence recall. No answer generation or calibrated abstention is measured."
+  },
+  "resources": {
+    "wallSeconds": 25.370895900000004,
+    "peakObservedRssBytes": 1728954368,
+    "ingestMs": {
+      "p50": 51.4992000000002,
+      "p95": 55.373499999999694
+    },
+    "indexedChunks": {
+      "min": 690,
+      "mean": 754.2595744680851,
+      "max": 851
+    },
+    "indexedCharactersMean": 524814.659574468
+  },
+  "overall": {
+    "lexical": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 0.1592000000000553,
+        "p95": 0.48809999999866704
+      },
+      "formatMs": {
+        "p50": 0.011699999999109423,
+        "p95": 0.01749999999992724
+      },
+      "formattedContextCharactersMean": 3687.968085106383,
+      "at": {
+        "1": {
+          "sessionRecall": 0.5427304964539007,
+          "sessionHit": 0.8382978723404255,
+          "sessionComplete": 0.2957446808510638,
+          "sessionMrr": 0.8382978723404255,
+          "turnRecall": 0.3077659574468085,
+          "turnHit": 0.44893617021276594,
+          "turnComplete": 0.1829787234042553,
+          "turnMrr": 0.44893617021276594,
+          "characters": 636.8851063829787
+        },
+        "3": {
+          "sessionRecall": 0.7301418439716313,
+          "sessionHit": 0.9042553191489362,
+          "sessionComplete": 0.574468085106383,
+          "sessionMrr": 0.8663120567375886,
+          "turnRecall": 0.5124113475177304,
+          "turnHit": 0.6638297872340425,
+          "turnComplete": 0.37446808510638296,
+          "turnMrr": 0.5457446808510639,
+          "characters": 2041.8978723404255
+        },
+        "6": {
+          "sessionRecall": 0.796099290780142,
+          "sessionHit": 0.925531914893617,
+          "sessionComplete": 0.6702127659574468,
+          "sessionMrr": 0.8713475177304965,
+          "turnRecall": 0.599964539007092,
+          "turnHit": 0.7340425531914894,
+          "turnComplete": 0.4765957446808511,
+          "turnMrr": 0.5624822695035461,
+          "characters": 2688.368085106383
+        }
+      }
+    },
+    "lexical-diversity": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 0.4634000000000924,
+        "p95": 0.8292000000001281
+      },
+      "formatMs": {
+        "p50": 0.011700000000018917,
+        "p95": 0.01860000000033324
+      },
+      "formattedContextCharactersMean": 3709.9744680851063,
+      "at": {
+        "1": {
+          "sessionRecall": 0.5427304964539007,
+          "sessionHit": 0.8382978723404255,
+          "sessionComplete": 0.2957446808510638,
+          "sessionMrr": 0.8382978723404255,
+          "turnRecall": 0.3077659574468085,
+          "turnHit": 0.44893617021276594,
+          "turnComplete": 0.1829787234042553,
+          "turnMrr": 0.44893617021276594,
+          "characters": 636.8851063829787
+        },
+        "3": {
+          "sessionRecall": 0.735886524822695,
+          "sessionHit": 0.9127659574468086,
+          "sessionComplete": 0.574468085106383,
+          "sessionMrr": 0.8698581560283688,
+          "turnRecall": 0.4868085106382979,
+          "turnHit": 0.6617021276595745,
+          "turnComplete": 0.32978723404255317,
+          "turnMrr": 0.539716312056738,
+          "characters": 2112.68085106383
+        },
+        "6": {
+          "sessionRecall": 0.7962765957446809,
+          "sessionHit": 0.9276595744680851,
+          "sessionComplete": 0.6680851063829787,
+          "sessionMrr": 0.8731914893617021,
+          "turnRecall": 0.5842907801418439,
+          "turnHit": 0.725531914893617,
+          "turnComplete": 0.4531914893617021,
+          "turnMrr": 0.5546808510638301,
+          "characters": 2717.472340425532
+        }
+      }
+    },
+    "recency": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 0.10410000000047148,
+        "p95": 0.16369999999915308
+      },
+      "formatMs": {
+        "p50": 0.005799999999908323,
+        "p95": 0.012600000000020373
+      },
+      "formattedContextCharactersMean": 3663.8255319148934,
+      "at": {
+        "1": {
+          "sessionRecall": 0.027304964539007093,
+          "sessionHit": 0.03829787234042553,
+          "sessionComplete": 0.019148936170212766,
+          "sessionMrr": 0.03829787234042553,
+          "turnRecall": 0,
+          "turnHit": 0,
+          "turnComplete": 0,
+          "turnMrr": 0,
+          "characters": 614.9851063829788
+        },
+        "3": {
+          "sessionRecall": 0.028368794326241138,
+          "sessionHit": 0.04042553191489362,
+          "sessionComplete": 0.019148936170212766,
+          "sessionMrr": 0.03900709219858157,
+          "turnRecall": 0,
+          "turnHit": 0,
+          "turnComplete": 0,
+          "turnMrr": 0,
+          "characters": 1985.8382978723405
+        },
+        "6": {
+          "sessionRecall": 0.028368794326241138,
+          "sessionHit": 0.04042553191489362,
+          "sessionComplete": 0.019148936170212766,
+          "sessionMrr": 0.03900709219858157,
+          "turnRecall": 0,
+          "turnHit": 0,
+          "turnComplete": 0,
+          "turnMrr": 0,
+          "characters": 2615.5787234042555
+        }
+      }
+    }
+  },
+  "byQuestionType": {
+    "knowledge-update": {
+      "lexical": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 0.14079999999739812,
+          "p95": 0.28470000000015716
+        },
+        "formatMs": {
+          "p50": 0.01089999999749125,
+          "p95": 0.017299999999522697
+        },
+        "formattedContextCharactersMean": 3641.347222222222,
+        "at": {
+          "1": {
+            "sessionRecall": 0.4861111111111111,
+            "sessionHit": 0.9722222222222222,
+            "sessionComplete": 0,
+            "sessionMrr": 0.9722222222222222,
+            "turnRecall": 0.2638888888888889,
+            "turnHit": 0.5277777777777778,
+            "turnComplete": 0,
+            "turnMrr": 0.5277777777777778,
+            "characters": 458.2638888888889
+          },
+          "3": {
+            "sessionRecall": 0.8402777777777778,
+            "sessionHit": 0.9861111111111112,
+            "sessionComplete": 0.6944444444444444,
+            "sessionMrr": 0.9768518518518517,
+            "turnRecall": 0.5902777777777778,
+            "turnHit": 0.7916666666666666,
+            "turnComplete": 0.3888888888888889,
+            "turnMrr": 0.6481481481481483,
+            "characters": 1737.3194444444443
+          },
+          "6": {
+            "sessionRecall": 0.9097222222222222,
+            "sessionHit": 1,
+            "sessionComplete": 0.8194444444444444,
+            "sessionMrr": 0.980324074074074,
+            "turnRecall": 0.738425925925926,
+            "turnHit": 0.8611111111111112,
+            "turnComplete": 0.6111111111111112,
+            "turnMrr": 0.6648148148148149,
+            "characters": 2610.402777777778
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 0.4514000000017404,
+          "p95": 0.70509999999922
+        },
+        "formatMs": {
+          "p50": 0.011999999998806743,
+          "p95": 0.016400000000430737
+        },
+        "formattedContextCharactersMean": 3739.9166666666665,
+        "at": {
+          "1": {
+            "sessionRecall": 0.4861111111111111,
+            "sessionHit": 0.9722222222222222,
+            "sessionComplete": 0,
+            "sessionMrr": 0.9722222222222222,
+            "turnRecall": 0.2638888888888889,
+            "turnHit": 0.5277777777777778,
+            "turnComplete": 0,
+            "turnMrr": 0.5277777777777778,
+            "characters": 458.2638888888889
+          },
+          "3": {
+            "sessionRecall": 0.8472222222222222,
+            "sessionHit": 1,
+            "sessionComplete": 0.6944444444444444,
+            "sessionMrr": 0.9814814814814814,
+            "turnRecall": 0.5208333333333334,
+            "turnHit": 0.7638888888888888,
+            "turnComplete": 0.2777777777777778,
+            "turnMrr": 0.6203703703703705,
+            "characters": 1897.375
+          },
+          "6": {
+            "sessionRecall": 0.9027777777777778,
+            "sessionHit": 1,
+            "sessionComplete": 0.8055555555555556,
+            "sessionMrr": 0.9814814814814814,
+            "turnRecall": 0.6828703703703705,
+            "turnHit": 0.8333333333333334,
+            "turnComplete": 0.5277777777777778,
+            "turnMrr": 0.6365740740740741,
+            "characters": 2726.4166666666665
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 0.11149999999906868,
+          "p95": 0.14099999999962165
+        },
+        "formatMs": {
+          "p50": 0.005600000000413274,
+          "p95": 0.01239999999961583
+        },
+        "formattedContextCharactersMean": 3670.5416666666665,
+        "at": {
+          "1": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 619.0833333333334
+          },
+          "3": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 1920.0555555555557
+          },
+          "6": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2608.847222222222
+          }
+        }
+      }
+    },
+    "multi-session": {
+      "lexical": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 0.13570000000072469,
+          "p95": 0.29690000000118744
+        },
+        "formatMs": {
+          "p50": 0.011500000000523869,
+          "p95": 0.016400000000430737
+        },
+        "formattedContextCharactersMean": 3695.6694214876034,
+        "at": {
+          "1": {
+            "sessionRecall": 0.33842975206611575,
+            "sessionHit": 0.7933884297520661,
+            "sessionComplete": 0,
+            "sessionMrr": 0.7933884297520661,
+            "turnRecall": 0.1293388429752066,
+            "turnHit": 0.2975206611570248,
+            "turnComplete": 0,
+            "turnMrr": 0.2975206611570248,
+            "characters": 730.3801652892562
+          },
+          "3": {
+            "sessionRecall": 0.5743801652892562,
+            "sessionHit": 0.9090909090909091,
+            "sessionComplete": 0.2892561983471074,
+            "sessionMrr": 0.8415977961432507,
+            "turnRecall": 0.2997245179063361,
+            "turnHit": 0.5371900826446281,
+            "turnComplete": 0.09090909090909091,
+            "turnMrr": 0.3953168044077135,
+            "characters": 2186.3884297520663
+          },
+          "6": {
+            "sessionRecall": 0.6537190082644627,
+            "sessionHit": 0.9090909090909091,
+            "sessionComplete": 0.39669421487603307,
+            "sessionMrr": 0.8415977961432507,
+            "turnRecall": 0.40674931129476594,
+            "turnHit": 0.6446280991735537,
+            "turnComplete": 0.19008264462809918,
+            "turnMrr": 0.42093663911845747,
+            "characters": 2715.4462809917354
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 0.40240000000085274,
+          "p95": 0.6628999999993539
+        },
+        "formatMs": {
+          "p50": 0.010500000000320142,
+          "p95": 0.018500000000130967
+        },
+        "formattedContextCharactersMean": 3701.03305785124,
+        "at": {
+          "1": {
+            "sessionRecall": 0.33842975206611575,
+            "sessionHit": 0.7933884297520661,
+            "sessionComplete": 0,
+            "sessionMrr": 0.7933884297520661,
+            "turnRecall": 0.1293388429752066,
+            "turnHit": 0.2975206611570248,
+            "turnComplete": 0,
+            "turnMrr": 0.2975206611570248,
+            "characters": 730.3801652892562
+          },
+          "3": {
+            "sessionRecall": 0.5845730027548209,
+            "sessionHit": 0.9173553719008265,
+            "sessionComplete": 0.2975206611570248,
+            "sessionMrr": 0.8457300275482094,
+            "turnRecall": 0.29283746556473833,
+            "turnHit": 0.5619834710743802,
+            "turnComplete": 0.06611570247933884,
+            "turnMrr": 0.4090909090909092,
+            "characters": 2229.4545454545455
+          },
+          "6": {
+            "sessionRecall": 0.6652892561983471,
+            "sessionHit": 0.9256198347107438,
+            "sessionComplete": 0.4132231404958678,
+            "sessionMrr": 0.8477961432506886,
+            "turnRecall": 0.38636363636363635,
+            "turnHit": 0.6363636363636364,
+            "turnComplete": 0.15702479338842976,
+            "turnMrr": 0.4272727272727274,
+            "characters": 2724.00826446281
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 0.09130000000004657,
+          "p95": 0.11499999999978172
+        },
+        "formatMs": {
+          "p50": 0.005600000000413274,
+          "p95": 0.011999999999716238
+        },
+        "formattedContextCharactersMean": 3688.909090909091,
+        "at": {
+          "1": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 661.1818181818181
+          },
+          "3": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2063.00826446281
+          },
+          "6": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2645.4793388429753
+          }
+        }
+      }
+    },
+    "single-session-assistant": {
+      "lexical": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 0.3819000000003143,
+          "p95": 0.8673999999991793
+        },
+        "formatMs": {
+          "p50": 0.012200000001030276,
+          "p95": 0.016800000001239823
+        },
+        "formattedContextCharactersMean": 3781.8214285714284,
+        "at": {
+          "1": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.7142857142857143,
+            "turnHit": 0.7142857142857143,
+            "turnComplete": 0.7142857142857143,
+            "turnMrr": 0.7142857142857143,
+            "characters": 887.5535714285714
+          },
+          "3": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.875,
+            "turnHit": 0.875,
+            "turnComplete": 0.875,
+            "turnMrr": 0.7916666666666667,
+            "characters": 2276.1428571428573
+          },
+          "6": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.875,
+            "turnHit": 0.875,
+            "turnComplete": 0.875,
+            "turnMrr": 0.7916666666666667,
+            "characters": 2777.625
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 0.6661000000021886,
+          "p95": 0.9735000000000582
+        },
+        "formatMs": {
+          "p50": 0.012000000002444722,
+          "p95": 0.018499999998311978
+        },
+        "formattedContextCharactersMean": 3779.4464285714284,
+        "at": {
+          "1": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.7142857142857143,
+            "turnHit": 0.7142857142857143,
+            "turnComplete": 0.7142857142857143,
+            "turnMrr": 0.7142857142857143,
+            "characters": 887.5535714285714
+          },
+          "3": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.8392857142857143,
+            "turnHit": 0.8392857142857143,
+            "turnComplete": 0.8392857142857143,
+            "turnMrr": 0.7708333333333334,
+            "characters": 2239.875
+          },
+          "6": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.8571428571428571,
+            "turnHit": 0.8571428571428571,
+            "turnComplete": 0.8571428571428571,
+            "turnMrr": 0.7752976190476192,
+            "characters": 2772.089285714286
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 0.09679999999934807,
+          "p95": 0.12819999999919673
+        },
+        "formatMs": {
+          "p50": 0.0059000000001105946,
+          "p95": 0.01569999999992433
+        },
+        "formattedContextCharactersMean": 3639.5714285714284,
+        "at": {
+          "1": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 518.7142857142857
+          },
+          "3": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 1982.3214285714287
+          },
+          "6": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2604.1785714285716
+          }
+        }
+      }
+    },
+    "single-session-preference": {
+      "lexical": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 0.27340000000003783,
+          "p95": 0.5720000000001164
+        },
+        "formatMs": {
+          "p50": 0.011400000001231092,
+          "p95": 0.016599999999925785
+        },
+        "formattedContextCharactersMean": 3595.5666666666666,
+        "at": {
+          "1": {
+            "sessionRecall": 0.3,
+            "sessionHit": 0.3,
+            "sessionComplete": 0.3,
+            "sessionMrr": 0.3,
+            "turnRecall": 0.05,
+            "turnHit": 0.06666666666666667,
+            "turnComplete": 0.03333333333333333,
+            "turnMrr": 0.06666666666666667,
+            "characters": 619.2
+          },
+          "3": {
+            "sessionRecall": 0.43333333333333335,
+            "sessionHit": 0.43333333333333335,
+            "sessionComplete": 0.43333333333333335,
+            "sessionMrr": 0.3611111111111111,
+            "turnRecall": 0.07777777777777777,
+            "turnHit": 0.1,
+            "turnComplete": 0.06666666666666667,
+            "turnMrr": 0.07777777777777777,
+            "characters": 1818.4333333333334
+          },
+          "6": {
+            "sessionRecall": 0.6333333333333333,
+            "sessionHit": 0.6333333333333333,
+            "sessionComplete": 0.6333333333333333,
+            "sessionMrr": 0.4083333333333333,
+            "turnRecall": 0.24444444444444444,
+            "turnHit": 0.3,
+            "turnComplete": 0.2,
+            "turnMrr": 0.12333333333333332,
+            "characters": 2555.0666666666666
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 0.542699999999968,
+          "p95": 0.9345999999995911
+        },
+        "formatMs": {
+          "p50": 0.011500000000523869,
+          "p95": 0.016099999999823922
+        },
+        "formattedContextCharactersMean": 3590.866666666667,
+        "at": {
+          "1": {
+            "sessionRecall": 0.3,
+            "sessionHit": 0.3,
+            "sessionComplete": 0.3,
+            "sessionMrr": 0.3,
+            "turnRecall": 0.05,
+            "turnHit": 0.06666666666666667,
+            "turnComplete": 0.03333333333333333,
+            "turnMrr": 0.06666666666666667,
+            "characters": 619.2
+          },
+          "3": {
+            "sessionRecall": 0.4666666666666667,
+            "sessionHit": 0.4666666666666667,
+            "sessionComplete": 0.4666666666666667,
+            "sessionMrr": 0.3722222222222223,
+            "turnRecall": 0.1111111111111111,
+            "turnHit": 0.13333333333333333,
+            "turnComplete": 0.1,
+            "turnMrr": 0.09444444444444446,
+            "characters": 1834.8333333333333
+          },
+          "6": {
+            "sessionRecall": 0.6,
+            "sessionHit": 0.6,
+            "sessionComplete": 0.6,
+            "sessionMrr": 0.4011111111111111,
+            "turnRecall": 0.24444444444444444,
+            "turnHit": 0.3,
+            "turnComplete": 0.2,
+            "turnMrr": 0.13,
+            "characters": 2560.6
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 0.09590000000025611,
+          "p95": 0.1161999999994805
+        },
+        "formatMs": {
+          "p50": 0.005400000000008731,
+          "p95": 0.011699999999109423
+        },
+        "formattedContextCharactersMean": 3499.9333333333334,
+        "at": {
+          "1": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 555.9666666666667
+          },
+          "3": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 1910.0666666666666
+          },
+          "6": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2436.6
+          }
+        }
+      }
+    },
+    "single-session-user": {
+      "lexical": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 0.12409999999999854,
+          "p95": 0.28309999999999036
+        },
+        "formatMs": {
+          "p50": 0.012600000000020373,
+          "p95": 0.03330000000005384
+        },
+        "formattedContextCharactersMean": 3653.96875,
+        "at": {
+          "1": {
+            "sessionRecall": 0.921875,
+            "sessionHit": 0.921875,
+            "sessionComplete": 0.921875,
+            "sessionMrr": 0.921875,
+            "turnRecall": 0.546875,
+            "turnHit": 0.5625,
+            "turnComplete": 0.53125,
+            "turnMrr": 0.5625,
+            "characters": 559.59375
+          },
+          "3": {
+            "sessionRecall": 0.96875,
+            "sessionHit": 0.96875,
+            "sessionComplete": 0.96875,
+            "sessionMrr": 0.9401041666666667,
+            "turnRecall": 0.796875,
+            "turnHit": 0.796875,
+            "turnComplete": 0.796875,
+            "turnMrr": 0.6744791666666666,
+            "characters": 2050.984375
+          },
+          "6": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9471354166666668,
+            "turnRecall": 0.875,
+            "turnHit": 0.875,
+            "turnComplete": 0.875,
+            "turnMrr": 0.6932291666666667,
+            "characters": 2659
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 0.40170000000034634,
+          "p95": 0.7835999999999785
+        },
+        "formatMs": {
+          "p50": 0.012499999999818101,
+          "p95": 0.02299999999991087
+        },
+        "formattedContextCharactersMean": 3670.859375,
+        "at": {
+          "1": {
+            "sessionRecall": 0.921875,
+            "sessionHit": 0.921875,
+            "sessionComplete": 0.921875,
+            "sessionMrr": 0.921875,
+            "turnRecall": 0.546875,
+            "turnHit": 0.5625,
+            "turnComplete": 0.53125,
+            "turnMrr": 0.5625,
+            "characters": 559.59375
+          },
+          "3": {
+            "sessionRecall": 0.984375,
+            "sessionHit": 0.984375,
+            "sessionComplete": 0.984375,
+            "sessionMrr": 0.9479166666666666,
+            "turnRecall": 0.78125,
+            "turnHit": 0.78125,
+            "turnComplete": 0.78125,
+            "turnMrr": 0.6614583333333334,
+            "characters": 2138.9375
+          },
+          "6": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9510416666666667,
+            "turnRecall": 0.890625,
+            "turnHit": 0.890625,
+            "turnComplete": 0.890625,
+            "turnMrr": 0.6872395833333332,
+            "characters": 2674.234375
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 0.10339999999996508,
+          "p95": 0.13239999999996144
+        },
+        "formatMs": {
+          "p50": 0.006900000000086948,
+          "p95": 0.013100000000122236
+        },
+        "formattedContextCharactersMean": 3729.15625,
+        "at": {
+          "1": {
+            "sessionRecall": 0.046875,
+            "sessionHit": 0.046875,
+            "sessionComplete": 0.046875,
+            "sessionMrr": 0.046875,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 616.171875
+          },
+          "3": {
+            "sessionRecall": 0.046875,
+            "sessionHit": 0.046875,
+            "sessionComplete": 0.046875,
+            "sessionMrr": 0.046875,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2064.421875
+          },
+          "6": {
+            "sessionRecall": 0.046875,
+            "sessionHit": 0.046875,
+            "sessionComplete": 0.046875,
+            "sessionMrr": 0.046875,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2687.5625
+          }
+        }
+      }
+    },
+    "temporal-reasoning": {
+      "lexical": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 0.15129999999953725,
+          "p95": 0.37709999999970023
+        },
+        "formatMs": {
+          "p50": 0.011599999999816646,
+          "p95": 0.016999999999825377
+        },
+        "formattedContextCharactersMean": 3704.6377952755906,
+        "at": {
+          "1": {
+            "sessionRecall": 0.4341207349081365,
+            "sessionHit": 0.8188976377952756,
+            "sessionComplete": 0.11811023622047244,
+            "sessionMrr": 0.8188976377952756,
+            "turnRecall": 0.2637795275590551,
+            "turnHit": 0.4645669291338583,
+            "turnComplete": 0.08661417322834646,
+            "turnMrr": 0.4645669291338583,
+            "characters": 581.6692913385826
+          },
+          "3": {
+            "sessionRecall": 0.6469816272965877,
+            "sessionHit": 0.889763779527559,
+            "sessionComplete": 0.4251968503937008,
+            "sessionMrr": 0.8503937007874016,
+            "turnRecall": 0.4703412073490813,
+            "turnHit": 0.6850393700787402,
+            "turnComplete": 0.2755905511811024,
+            "turnMrr": 0.568241469816273,
+            "characters": 2021.8267716535433
+          },
+          "6": {
+            "sessionRecall": 0.7131233595800524,
+            "sessionHit": 0.8976377952755905,
+            "sessionComplete": 0.5433070866141733,
+            "sessionMrr": 0.8523622047244095,
+            "turnRecall": 0.5296587926509186,
+            "turnHit": 0.7165354330708661,
+            "turnComplete": 0.36220472440944884,
+            "turnMrr": 0.5761154855643045,
+            "characters": 2713.700787401575
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 0.4606999999996333,
+          "p95": 0.8292000000001281
+        },
+        "formatMs": {
+          "p50": 0.011500000000523869,
+          "p95": 0.01870000000053551
+        },
+        "formattedContextCharactersMean": 3718.732283464567,
+        "at": {
+          "1": {
+            "sessionRecall": 0.4341207349081365,
+            "sessionHit": 0.8188976377952756,
+            "sessionComplete": 0.11811023622047244,
+            "sessionMrr": 0.8188976377952756,
+            "turnRecall": 0.2637795275590551,
+            "turnHit": 0.4645669291338583,
+            "turnComplete": 0.08661417322834646,
+            "turnMrr": 0.4645669291338583,
+            "characters": 581.6692913385826
+          },
+          "3": {
+            "sessionRecall": 0.6388451443569552,
+            "sessionHit": 0.889763779527559,
+            "sessionComplete": 0.4015748031496063,
+            "sessionMrr": 0.8503937007874016,
+            "turnRecall": 0.4372703412073491,
+            "turnHit": 0.6850393700787402,
+            "turnComplete": 0.2125984251968504,
+            "turnMrr": 0.5603674540682415,
+            "characters": 2119.803149606299
+          },
+          "6": {
+            "sessionRecall": 0.7145669291338581,
+            "sessionHit": 0.8976377952755905,
+            "sessionComplete": 0.5354330708661418,
+            "sessionMrr": 0.8523622047244095,
+            "turnRecall": 0.5225721784776902,
+            "turnHit": 0.7086614173228346,
+            "turnComplete": 0.3543307086614173,
+            "turnMrr": 0.5658792650918635,
+            "characters": 2740.9370078740158
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 0.14210000000093714,
+          "p95": 0.1915000000008149
+        },
+        "formatMs": {
+          "p50": 0.005699999999706051,
+          "p95": 0.01330000000052678
+        },
+        "formattedContextCharactersMean": 3652.6062992125985,
+        "at": {
+          "1": {
+            "sessionRecall": 0.021653543307086614,
+            "sessionHit": 0.031496062992125984,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.031496062992125984,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 624.4409448818898
+          },
+          "3": {
+            "sessionRecall": 0.025590551181102362,
+            "sessionHit": 0.03937007874015748,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.03412073490813648,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 1929.4566929133857
+          },
+          "6": {
+            "sessionRecall": 0.025590551181102362,
+            "sessionHit": 0.03937007874015748,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.03412073490813648,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 2601.9370078740158
+          }
+        }
+      }
+    }
+  }
+}

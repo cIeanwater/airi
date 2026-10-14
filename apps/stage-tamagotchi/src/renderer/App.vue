@@ -6,9 +6,10 @@ import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/el
 import { themeColorFromValue, useThemeColor } from '@proj-airi/stage-layouts/composables/theme-color'
 import { artistrySyncConfig } from '@proj-airi/stage-shared'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
-import { useInferencePreload } from '@proj-airi/stage-ui/composables'
-import { initializeAnalytics } from '@proj-airi/stage-ui/libs/analytics'
+import { updateModelAssetStatus, useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
+import { initializeAnalytics } from '@proj-airi/stage-ui/libs/product-signals'
+import { isSherpawModelBundled, setSherpawModelAssetHost } from '@proj-airi/stage-ui/libs/providers/providers/sherpaw/model-assets'
 import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
@@ -19,7 +20,6 @@ import { useContextBridgeStore } from '@proj-airi/stage-ui/stores/mods/api/conte
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useArtistryStore } from '@proj-airi/stage-ui/stores/modules/artistry'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
-import { configureAsDefaultsIfEmpty, unconfigureAuthenticationProviders } from '@proj-airi/stage-ui/stores/modules/default'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision'
@@ -42,32 +42,37 @@ import {
   electronGodotStageGetStatus,
   electronGodotStageStatusChanged,
   electronSettingsNavigate,
-  electronStartTrackMousePosition,
   i18nGetLocale,
   i18nSetLocale,
 } from '../shared/eventa'
+import { electronModelAssetCancel, electronModelAssetEnsure, electronModelAssetRemove, electronModelAssetsClear, electronModelAssetsList, electronModelAssetStatusChanged } from '../shared/eventa/model-assets'
 import {
   electronPluginUpdateCapability,
   pluginProtocolListProviders,
   pluginProtocolListProvidersEventName,
 } from '../shared/eventa/plugin/capabilities'
 import {
+  electronPluginCancelDirectoryImport,
+  electronPluginCommitDirectoryImport,
   electronPluginInspect,
   electronPluginList,
   electronPluginLoad,
   electronPluginLoadEnabled,
+  electronPluginPrepareDirectoryImport,
   electronPluginSetAutoReload,
   electronPluginSetEnabled,
   electronPluginUnload,
 } from '../shared/eventa/plugin/host'
 import { electronPluginToolsChanged } from '../shared/eventa/plugin/tools'
 import { initializeElectronAuthCallbackBridge } from './bridges/electron-auth-callback'
+import { initializeIOTraceRecordingBridge } from './bridges/io-trace-recording'
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useLanguage } from './composables/use-language'
 import { useServerChannelSettingsStore } from './stores/settings/server-channel'
 import { useStageWindowLifecycleStore } from './stores/stage-window-lifecycle'
 import {
   useTamagotchiBuiltinToolsStore,
+  useTamagotchiHomeAssistantStore,
   useTamagotchiMcpToolsStore,
   useTamagotchiPluginToolsStore,
 } from './stores/tools'
@@ -79,17 +84,43 @@ const { language, themeColorsHue, themeColorsHueDynamic } = storeToRefs(settings
 const router = useRouter()
 const route = useRoute()
 const context = useElectronEventaContext()
+const listModelAssets = useElectronEventaInvoke(electronModelAssetsList)
+const ensureModelAsset = useElectronEventaInvoke(electronModelAssetEnsure)
+const cancelModelAsset = useElectronEventaInvoke(electronModelAssetCancel)
+const removeModelAsset = useElectronEventaInvoke(electronModelAssetRemove)
+const clearModelAssets = useElectronEventaInvoke(electronModelAssetsClear)
+const stopModelAssetStatus = context.value.on(electronModelAssetStatusChanged, (event) => {
+  if (event.body && !isSherpawModelBundled(event.body.id))
+    updateModelAssetStatus(event.body)
+})
+setSherpawModelAssetHost({
+  fetch: (model, fileName, signal) => fetch(
+    `airi-model://assets/${encodeURIComponent(model.id)}/${encodeURIComponent(model.revision)}/${fileName}`,
+    { signal },
+  ),
+  list: listModelAssets,
+  ensure: ensureModelAsset,
+  cancel: cancelModelAsset,
+  remove: removeModelAsset,
+  clear: clearModelAssets,
+})
 const getMainLocale = useElectronEventaInvoke(i18nGetLocale)
 const setLocale = useElectronEventaInvoke(i18nSetLocale)
 const windowContext = resolveRendererWindowContext()
 const initialRoutePath = resolveInitialRendererRoutePath(route.path)
 const chatStore = useChatStore()
 const builtinToolsStore = useTamagotchiBuiltinToolsStore()
+const homeAssistantStore = useTamagotchiHomeAssistantStore()
 const mcpToolsStore = useTamagotchiMcpToolsStore()
 const pluginToolsStore = useTamagotchiPluginToolsStore()
 const syncedPinia = usePiniaSynced()
 const isSpotlightWindow = initialRoutePath === '/spotlight'
+// The floating chat resizes from its own grip, which keeps the corner beside the character in place.
+const isFloatingChatWindow = initialRoutePath === '/chat-floating'
 const isSettingsWindow = initialRoutePath === '/settings' || initialRoutePath.startsWith('/settings/')
+const stopIOTraceRecordingBridge = initialRoutePath === '/'
+  ? initializeIOTraceRecordingBridge(context.value)
+  : undefined
 
 async function refreshPluginRuntimeTools() {
   try {
@@ -111,6 +142,9 @@ const stopLeadershipListener = syncedPinia.onLeadershipChange((isLeader) => {
   })
   void mcpToolsStore.refresh().catch((error) => {
     console.warn('[App] Failed to refresh MCP runtime tools:', error)
+  })
+  void homeAssistantStore.refresh().catch((error) => {
+    console.warn('[App] Failed to refresh Home Assistant tools:', error)
   })
   void refreshPluginRuntimeTools()
 })
@@ -142,8 +176,7 @@ function createFullStageRuntime() {
     if (!syncedPinia.isLeader())
       return
 
-    if (await unconfigureAuthenticationProviders())
-      await cardStore.persistActiveCardModuleSelections()
+    await cardStore.configureForAuthentication(false)
   }
 
   function registerAuthenticatedSetup() {
@@ -151,8 +184,7 @@ function createFullStageRuntime() {
       if (!syncedPinia.isLeader())
         return
 
-      if (await configureAsDefaultsIfEmpty())
-        await cardStore.persistActiveCardModuleSelections()
+      await cardStore.configureForAuthentication(true)
       await onboardingStore.closeAfterAuthentication()
     })
     stopLoggedOutSetup ??= authStore.onLogout(removeAuthenticationProviderConfiguration)
@@ -161,13 +193,15 @@ function createFullStageRuntime() {
   const { activeProvider, artistryGlobals, activeModel, defaultPromptPrefix, providerOptions } = storeToRefs(artistryStore)
   const getServerChannelConfig = useElectronEventaInvoke(electronGetServerChannelConfig)
   const listPlugins = useElectronEventaInvoke(electronPluginList)
+  const preparePluginDirectoryImport = useElectronEventaInvoke(electronPluginPrepareDirectoryImport)
+  const commitPluginDirectoryImport = useElectronEventaInvoke(electronPluginCommitDirectoryImport)
+  const cancelPluginDirectoryImport = useElectronEventaInvoke(electronPluginCancelDirectoryImport)
   const setPluginEnabled = useElectronEventaInvoke(electronPluginSetEnabled)
   const setPluginAutoReload = useElectronEventaInvoke(electronPluginSetAutoReload)
   const loadEnabledPlugins = useElectronEventaInvoke(electronPluginLoadEnabled)
   const loadPlugin = useElectronEventaInvoke(electronPluginLoad)
   const unloadPlugin = useElectronEventaInvoke(electronPluginUnload)
   const inspectPluginHost = useElectronEventaInvoke(electronPluginInspect)
-  const startTrackingCursorPoint = useElectronEventaInvoke(electronStartTrackMousePosition)
   const reportPluginCapability = useElectronEventaInvoke(electronPluginUpdateCapability)
   const getGodotStageStatus = useElectronEventaInvoke(electronGodotStageGetStatus)
   const syncArtistryConfig = useElectronEventaInvoke(artistrySyncConfig)
@@ -196,6 +230,9 @@ function createFullStageRuntime() {
 
   // NOTICE: register plugin host bridge during setup to avoid race with pages using it in immediate watchers.
   pluginHostInspectorStore.setBridge({
+    prepareDirectoryImport: () => preparePluginDirectoryImport(),
+    commitDirectoryImport: payload => commitPluginDirectoryImport(payload),
+    cancelDirectoryImport: payload => cancelPluginDirectoryImport(payload),
     list: () => listPlugins(),
     setEnabled: async (payload) => {
       const result = await setPluginEnabled(payload)
@@ -289,7 +326,6 @@ function createFullStageRuntime() {
       contextBridgeStore.initialize()
       if (!isWidgetsWindow) {
         characterOrchestratorStore.initialize()
-        await startTrackingCursorPoint()
       }
 
       defineInvokeHandler(context.value, pluginProtocolListProviders, async () => listProvidersForPluginHost())
@@ -339,6 +375,13 @@ if (isSettingsWindow) {
 }
 
 onMounted(async () => {
+  void listModelAssets().then((statuses) => {
+    for (const status of statuses) {
+      if (!isSherpawModelBundled(status.id))
+        updateModelAssetStatus(status)
+    }
+  }).catch(error => console.warn('Failed to read model asset status:', error))
+
   // NOTICE: Issue #1658
   // When Electron restarts, renderer localStorage may not be flushed to disk.
   // The store's onMounted hook falls back to navigator.language, which triggers
@@ -361,6 +404,8 @@ watch(themeColorsHueDynamic, () => {
 }, { immediate: true })
 
 onUnmounted(() => {
+  stopIOTraceRecordingBridge?.()
+  stopModelAssetStatus()
   stopLeadershipListener?.()
   chatStore.dispose()
   fullStageRuntime?.dispose()
@@ -371,7 +416,7 @@ onUnmounted(() => {
   <ToasterRoot @close="id => toast.dismiss(id)">
     <Toaster />
   </ToasterRoot>
-  <ResizeHandler v-if="!isSpotlightWindow" />
+  <ResizeHandler v-if="!isSpotlightWindow && !isFloatingChatWindow" />
   <RouterView />
 </template>
 

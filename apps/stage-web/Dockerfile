@@ -2,8 +2,8 @@ FROM node:24-trixie AS build-stage
 
 WORKDIR /app
 
-ARG VITE_ENABLE_POSTHOG=false
-ENV VITE_ENABLE_POSTHOG=${VITE_ENABLE_POSTHOG}
+ARG VITE_ENABLE_ANALYTICS=false
+ENV VITE_ENABLE_ANALYTICS=${VITE_ENABLE_ANALYTICS}
 
 RUN apt update && apt install -y ca-certificates curl
 RUN update-ca-certificates
@@ -16,8 +16,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile
 
 RUN pnpm -F @proj-airi/stage-web run build && \
-    pnpm -F @proj-airi/docs run build:base && \
-    mv ./docs/.vitepress/dist ./apps/stage-web/dist/docs && \
+    ./scripts/build-airi-docs.sh ./apps/stage-web/dist/docs && \
     pnpm -F @proj-airi/stage-ui run story:build && \
     mv ./packages/stage-ui/.histoire/dist ./apps/stage-web/dist/ui
 

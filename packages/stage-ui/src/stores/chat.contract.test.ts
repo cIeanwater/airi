@@ -1,20 +1,26 @@
-import type { StreamOptions } from '@proj-airi/core-agent'
-import type { ChatProvider } from '@xsai-ext/providers/utils'
-import type { Message, Tool } from '@xsai/shared-chat'
+import type { ChatOrchestratorSessionPort, Conversation, StreamOptions, Turn } from '@proj-airi/core-agent'
+import type { GenerationProvider } from '@proj-airi/provider-inference'
+import type { Tool } from '@xsai/shared-chat'
 import type { SyncedPiniaRuntime } from 'pinia-plugin-synced'
+
+import type { LlmStreamOptions } from './ai/chat-llm/llm'
+import type { useMemoryStore } from './modules/memory'
 
 import { errorMessageFrom } from '@moeru/std'
 import { IOAttributes, IOSpanNames } from '@proj-airi/stage-shared'
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
+import { createSyncedPiniaPlugin } from 'pinia-plugin-synced'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, ref } from 'vue'
+import { computed, createApp, nextTick, reactive, ref } from 'vue'
 
 import {
   AIRI_CHAT_APP_SURFACE_HEADER,
   AIRI_CHAT_ROUND_ID_HEADER,
   AIRI_CHAT_SESSION_ID_HEADER,
-} from '../libs/analytics-headers'
+} from '../libs/product-signals/headers'
+import { useAuthStore } from './auth'
 import { useChatStore } from './chat'
+import { useContextObservabilityStore } from './devtools/context-observability'
 import { useConsciousnessSettingsStore } from './modules/consciousness-settings'
 
 vi.hoisted(() => {
@@ -28,7 +34,7 @@ vi.hoisted(() => {
 const ioTracerMocks = vi.hoisted(() => {
   const activeTurnSpan = { value: undefined as any }
   const spans: any[] = []
-  const startSpanMock = vi.fn((name: string) => {
+  const startSpanMock = vi.fn((name: string, _parent?: unknown) => {
     const span = {
       name,
       addEvent: vi.fn(),
@@ -47,9 +53,13 @@ const ioTracerMocks = vi.hoisted(() => {
 })
 
 const llmStreamMock = vi.fn()
+const memoryMocks = vi.hoisted(() => ({
+  beginTurn: vi.fn<ReturnType<typeof useMemoryStore>['beginTurn']>(),
+  recallTurn: vi.fn<ReturnType<typeof useMemoryStore>['recallTurn']>(),
+  rememberTurn: vi.fn<ReturnType<typeof useMemoryStore>['rememberTurn']>(),
+}))
 const trackFirstMessageMock = vi.fn()
 const chatAnalyticsMocks = vi.hoisted(() => ({
-  trackAiGeneration: vi.fn(),
   trackMessageRound: vi.fn(),
   trackMessageRoundFailed: vi.fn(),
   trackMessageSent: vi.fn(),
@@ -62,7 +72,9 @@ const redundantChatAnalyticsMocks = vi.hoisted(() => ({
 }))
 const ingestContextMessageMock = vi.fn()
 const getContextsSnapshotMock = vi.fn()
+const createRuntimePromptContextMock = vi.fn()
 const createMinecraftContextMock = vi.fn()
+const createUserAccountContextMock = vi.fn()
 const persistSessionMessagesMock = vi.fn()
 const forkSessionMock = vi.fn()
 const ensureSessionMock = vi.fn()
@@ -73,12 +85,21 @@ const disposeSessionMock = vi.fn()
 const ensureCurrentSessionMock = vi.fn()
 const getChatProviderInstanceMock = vi.fn()
 const getToolsByNamesMock = vi.fn<(names: string[]) => Tool[]>()
+const visionMocks = vi.hoisted(() => ({ configured: false, model: 'system', runInference: vi.fn(), useForToolImages: true }))
+/** A catalog model can omit its abilities, as most provider catalogs do. */
+interface CatalogModel { id: string, inputModalities?: string[], metadata: { abilities?: { vision: boolean } } }
+const consciousnessModels = vi.hoisted(() => ({ value: [{ id: 'gpt-test', metadata: { abilities: { vision: false } } }] as CatalogModel[] }))
 
 const activeSessionIdRef = ref('session-1')
+const activeCardIdRef = ref('alice')
 const activeProviderRef = ref('mock-provider')
+const cardSelections = new Map<string, { provider: string, model: string }>()
+const sessionSystemPrompts = new Map<string, string>()
 const activeModelRef = ref('gpt-test')
+const chatReadyRef = computed(() => !!activeProviderRef.value && !!activeModelRef.value)
 const streamingMessageRef = ref<any>({ role: 'assistant', content: '', slices: [], tool_results: [] })
-const sessionMessages: Record<string, any[]> = {}
+// The chat session store keeps messages in reactive state, so the mock does too.
+const sessionMessages = reactive<Record<string, any[]>>({})
 let currentGeneration = 1
 
 vi.mock('pinia', async () => {
@@ -93,13 +114,10 @@ vi.mock('../composables', () => ({
   getConversationAnalyticsSurface: () => 'web',
 }))
 
-vi.mock('../libs/analytics', () => ({
+vi.mock('../libs/product-signals', () => ({
   getAnalytics: () => ({
     emit: (event: { name: string }, properties: unknown) => {
       switch (event.name) {
-        case '$ai_generation':
-          chatAnalyticsMocks.trackAiGeneration(properties)
-          break
         case 'message_round':
           chatAnalyticsMocks.trackMessageRound(properties)
           break
@@ -126,6 +144,16 @@ vi.mock('../composables/use-io-tracer', () => ({
 
 vi.mock('./chat/context-providers', () => ({
   createMinecraftContext: () => createMinecraftContextMock(),
+  createRuntimePromptContext: (prompt: string) => createRuntimePromptContextMock(prompt),
+  createUserAccountContext: () => createUserAccountContextMock(),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    locale: ref('en'),
+    t: (key: string) => key,
+    te: () => true,
+  }),
 }))
 
 vi.mock('./chat/context-store', () => ({
@@ -133,6 +161,33 @@ vi.mock('./chat/context-store', () => ({
     ingestContextMessage: ingestContextMessageMock,
     getContextsSnapshot: getContextsSnapshotMock,
   }),
+}))
+
+// IndexedDB is a browser boundary. Browser tests exercise the real sticker repository.
+vi.mock('../database/repos/chat-assets.repo')
+
+vi.mock('../database/repos/stickers.repo', () => ({
+  stickersRepo: { read: async () => ({ records: [], images: [] }) },
+}))
+
+vi.mock('./modules/vision', () => ({
+  useVisionStore: () => ({
+    get configured() {
+      return visionMocks.configured
+    },
+    activeProvider: 'apple-vision',
+    get activeModel() {
+      return visionMocks.model
+    },
+    useForChat: true,
+    get useForToolImages() {
+      return visionMocks.useForToolImages
+    },
+  }),
+}))
+
+vi.mock('../composables/vision/use-vision-inference', () => ({
+  useVisionInference: () => ({ runVisionInference: visionMocks.runInference }),
 }))
 
 vi.mock('./chat/session-store', () => ({
@@ -147,10 +202,20 @@ vi.mock('./chat/session-store', () => ({
       sessionMessages[sessionId] ??= []
       sessionMessages[sessionId].push(message)
     },
+    commitUserMessage: (async (sessionId, message) => {
+      sessionMessages[sessionId] ??= []
+      const existing = sessionMessages[sessionId].some(item => item.id === message.id)
+      if (!existing)
+        sessionMessages[sessionId].push(message)
+      await persistSessionMessagesMock(sessionId)
+      return { status: existing ? 'existing' : 'inserted', messageId: message.id }
+    }) satisfies ChatOrchestratorSessionPort['commitUserMessage'],
     cleanupMessages: (sessionId: string) => {
       sessionMessages[sessionId] = []
     },
+    sessionMetas: { 'session-1': { userId: 'local', characterId: 'alice' }, 'session-2': { userId: 'local', characterId: 'bob' }, 'session-b': { userId: 'local', characterId: 'bob' }, 'session-forked': { userId: 'local', characterId: 'alice' } },
     getSessionMessages: (sessionId: string) => sessionMessages[sessionId] ?? [],
+    getSessionSystemPrompt: (sessionId: string) => sessionSystemPrompts.get(sessionId) ?? 'system prompt',
     getSessionMessagesIfLoaded: (sessionId: string) => sessionMessages[sessionId],
     loadSession: loadSessionMock,
     deleteSession: deleteSessionMock,
@@ -163,6 +228,9 @@ vi.mock('./chat/session-store', () => ({
       sessionMessages[sessionId] = messages
     },
     forkSession: forkSessionMock,
+    deleteMessage: async ({ sessionId, messageId }: { sessionId: string, messageId: string }) => {
+      sessionMessages[sessionId] = (sessionMessages[sessionId] ?? []).filter(message => message.id !== messageId)
+    },
     // Cloud sync surface used by `chat.ts performSend`. Mocked as a no-op so
     // the orchestrator contract tests do not need a real WS / cloud mapper.
     pushMessageToCloud: vi.fn().mockResolvedValue(undefined),
@@ -172,6 +240,8 @@ vi.mock('./chat/session-store', () => ({
 vi.mock('./chat/stream-store', () => ({
   useChatStreamStore: () => ({
     streamingMessage: streamingMessageRef,
+    activeTurns: [],
+    updateActiveTurns: vi.fn(),
   }),
 }))
 
@@ -183,7 +253,9 @@ vi.mock('./ai/chat-llm/llm', () => ({
 
 vi.mock('./ai/chat-llm/tools', () => ({
   useLlmToolsStore: () => ({
+    activeTools: [],
     getToolsByNames: (...names: string[]) => getToolsByNamesMock(names),
+    tools: [{ function: { name: 'computer_use' }, requiresExplicitSelection: true }],
   }),
 }))
 
@@ -197,6 +269,9 @@ vi.mock('./modules/consciousness', () => ({
   useConsciousnessStore: () => ({
     activeModel: activeModelRef,
     activeProvider: activeProviderRef,
+    chatReady: chatReadyRef,
+    providerModels: consciousnessModels.value,
+    getModelsForProvider: async () => consciousnessModels.value,
     getChatProviderInstance: (providerId: string) => getChatProviderInstanceMock(providerId, {
       reasoning: useConsciousnessSettingsStore().reasoning ? 'enabled' : 'disabled',
     }),
@@ -206,8 +281,19 @@ vi.mock('./modules/consciousness', () => ({
 vi.mock('./modules/airi-card', () => ({
   useAiriCardStore: () => ({
     activeCard: undefined,
+    get activeCardId() {
+      return activeCardIdRef.value
+    },
+    getCard: () => undefined,
+    getModules: (id: string) => ({
+      consciousness: cardSelections.get(id) ?? { provider: activeProviderRef.value, model: activeModelRef.value },
+      vision: { provider: visionMocks.configured ? 'vision-provider' : '', model: visionMocks.configured ? 'vision-model' : '' },
+    }),
   }),
 }))
+
+// This boundary owns persistent memory. Browser tests exercise real memory storage and Web Locks.
+vi.mock('./modules/memory', () => ({ useMemoryStore: () => memoryMocks }))
 
 vi.mock('./modules/artistry-autonomous', () => ({
   useAutonomousArtistryStore: () => ({
@@ -222,14 +308,41 @@ vi.mock('./modules/web-search', () => ({
   useWebSearchStore: () => ({}),
 }))
 
-const provider = {
-  chat: () => ({ baseURL: 'https://example.com/' }),
-} as unknown as ChatProvider
+const provider: GenerationProvider = {
+  generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'https://example.com/' } }),
+}
+
+/** An assistant message whose stored tool result holds an original screenshot. */
+function storedToolImageMessage() {
+  return {
+    role: 'assistant',
+    id: 'assistant-1',
+    content: '',
+    createdAt: 3,
+    slices: [],
+    tool_results: [],
+    generationTranscript: {
+      type: 'assistant',
+      id: 'assistant-1',
+      status: 'completed',
+      rounds: [{
+        id: 'round-1',
+        content: [{ type: 'tool', invocationId: 'invocation-1' }],
+        projectionIssues: [],
+        toolInvocations: [{ id: 'invocation-1', callId: 'call-1', name: 'computer_use_read_image', arguments: '{}', execution: { status: 'succeeded', output: [{ type: 'image', url: 'data:image/png;base64,aW1hZ2U=' }] } }],
+      }],
+    },
+  }
+}
 
 describe('chat store contract', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     llmStreamMock.mockReset()
+    memoryMocks.beginTurn.mockReset()
+    memoryMocks.recallTurn.mockReset().mockResolvedValue('')
+    memoryMocks.rememberTurn.mockReset().mockResolvedValue(undefined)
+    activeCardIdRef.value = 'alice'
     trackFirstMessageMock.mockReset()
     for (const analyticsMock of Object.values(chatAnalyticsMocks))
       analyticsMock.mockReset()
@@ -240,6 +353,9 @@ describe('chat store contract', () => {
     ingestContextMessageMock.mockReset()
     getContextsSnapshotMock.mockReset()
     getContextsSnapshotMock.mockReturnValue({})
+    createUserAccountContextMock.mockReset().mockReturnValue(null)
+    createRuntimePromptContextMock.mockReset()
+    createRuntimePromptContextMock.mockReturnValue(undefined)
     createMinecraftContextMock.mockReset()
     createMinecraftContextMock.mockReturnValue(undefined)
     persistSessionMessagesMock.mockReset()
@@ -259,11 +375,18 @@ describe('chat store contract', () => {
       },
       execute: vi.fn(),
     })))
+    visionMocks.configured = false
+    visionMocks.model = 'system'
+    visionMocks.useForToolImages = true
+    visionMocks.runInference.mockReset()
+    consciousnessModels.value = [{ id: 'gpt-test', metadata: { abilities: { vision: false } } }]
     ioTracerMocks.activeTurnSpan.value = undefined
     ioTracerMocks.spans.length = 0
     ioTracerMocks.startSpanMock.mockClear()
     activeSessionIdRef.value = 'session-1'
     activeProviderRef.value = 'mock-provider'
+    cardSelections.clear()
+    sessionSystemPrompts.clear()
     streamingMessageRef.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
     currentGeneration = 1
 
@@ -274,13 +397,314 @@ describe('chat store contract', () => {
     sessionMessages['session-1'] = [{ role: 'system', content: 'system prompt', createdAt: 1, id: 'system' }]
   })
 
+  describe('long-term memory ownership', () => {
+    beforeEach(() => {
+      memoryMocks.beginTurn.mockImplementation((scope, text, sessionId, messageId, createdAt) => ({
+        scope,
+        text,
+        sessionId,
+        messageId,
+        createdAt,
+        consentGeneration: 0,
+      }))
+    })
+
+    it('recalls evidence without changing history and captures only a successful raw user turn', async () => {
+      memoryMocks.recallTurn.mockResolvedValue('<memory-evidence>Untrusted old user note</memory-evidence>')
+      let projected: Conversation | undefined
+      llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, context: Conversation, options: StreamOptions) => {
+        projected = context
+        expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+        await options.onStreamEvent?.({ type: 'text-delta', text: 'Assistant assertion must not be saved' })
+        await options.onStreamEvent?.({ type: 'finish' })
+      })
+      const store = useChatStore()
+      store.onChatTurnComplete(async () => {
+        expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+      })
+
+      await store.ingest('I moved to Kyoto.', { model: 'gpt-test', chatProvider: provider }, 'session-1')
+
+      expect(memoryMocks.recallTurn).toHaveBeenCalledOnce()
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledOnce()
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledWith(expect.objectContaining({
+        scope: { userId: 'local', characterId: 'alice' },
+        text: 'I moved to Kyoto.',
+        sessionId: 'session-1',
+        messageId: expect.any(String),
+      }))
+      expect(JSON.stringify(projected)).toContain('Untrusted old user note')
+      expect(JSON.stringify(sessionMessages['session-1'])).not.toContain('memory-evidence')
+    })
+
+    // ROOT CAUSE:
+    //
+    // A background session can differ from the selected character. The old adapter used activeCardId for memory ownership.
+    // The adapter now uses the target session metadata and retains that scope until the request settles.
+    it('keeps the target session scope when the selected character changes', async () => {
+      activeSessionIdRef.value = 'session-2'
+      activeCardIdRef.value = 'bob'
+      memoryMocks.recallTurn.mockImplementation(async (turn) => {
+        expect(turn.scope.characterId).toBe('alice')
+        activeCardIdRef.value = 'another-character'
+        return ''
+      })
+
+      await useChatStore().ingest('Alice private note', { model: 'gpt-test', chatProvider: provider }, 'session-1')
+
+      expect(memoryMocks.beginTurn).toHaveBeenCalledWith({ userId: 'local', characterId: 'alice' }, 'Alice private note', 'session-1', expect.any(String), expect.any(Number))
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledWith(expect.objectContaining({ scope: { userId: 'local', characterId: 'alice' } }))
+    })
+
+    it('keeps simultaneous sessions with the same message id in separate memory scopes', async () => {
+      const store = useChatStore()
+      await Promise.all([
+        store.ingest('Alice note', { model: 'gpt-test', chatProvider: provider, messageId: 'shared-message' }, 'session-1'),
+        store.ingest('Bob note', { model: 'gpt-test', chatProvider: provider, messageId: 'shared-message' }, 'session-2'),
+      ])
+
+      expect(memoryMocks.recallTurn).toHaveBeenCalledTimes(2)
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledTimes(2)
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-1', text: 'Alice note', scope: { userId: 'local', characterId: 'alice' } }))
+      expect(memoryMocks.rememberTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-2', text: 'Bob note', scope: { userId: 'local', characterId: 'bob' } }))
+    })
+
+    it('does not access a former account scope through stale session metadata', async () => {
+      useAuthStore().user = { id: 'another-user', name: 'Memory test', email: 'memory@example.test', emailVerified: false, createdAt: new Date(), updatedAt: new Date() }
+
+      await useChatStore().ingest('New account text', { model: 'gpt-test', chatProvider: provider }, 'session-1')
+
+      expect(memoryMocks.beginTurn).not.toHaveBeenCalled()
+      expect(memoryMocks.recallTurn).not.toHaveBeenCalled()
+      expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+    })
+
+    it('discards evidence and capture if the account changes while recall is pending', async () => {
+      memoryMocks.recallTurn.mockImplementation(async () => {
+        useAuthStore().user = { id: 'another-user', name: 'Memory test', email: 'memory@example.test', emailVerified: false, createdAt: new Date(), updatedAt: new Date() }
+        return '<memory-evidence>Former account private note</memory-evidence>'
+      })
+
+      await useChatStore().ingest('Read my note', { model: 'gpt-test', chatProvider: provider }, 'session-1')
+
+      expect(memoryMocks.recallTurn).toHaveBeenCalledOnce()
+      expect(JSON.stringify(llmStreamMock.mock.calls[0][2])).not.toContain('Former account private note')
+      expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+    })
+
+    it('does not capture a provider response whose completion hook fails', async () => {
+      const store = useChatStore()
+      const removeHook = store.onChatTurnComplete(async () => {
+        throw new Error('completion failed')
+      })
+
+      await expect(store.ingest('Failed round', { model: 'gpt-test', chatProvider: provider })).rejects.toThrow('completion failed')
+      expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+
+      removeHook()
+      memoryMocks.beginTurn.mockReturnValue(undefined)
+      await store.ingest('Next turn without memory', { model: 'gpt-test', chatProvider: provider })
+      expect(memoryMocks.recallTurn).toHaveBeenCalledOnce()
+      expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+    })
+
+    it('does not capture a turn if its session resets during the provider response', async () => {
+      llmStreamMock.mockImplementation(async () => {
+        currentGeneration += 1
+      })
+
+      await useChatStore().ingest('Discarded turn', { model: 'gpt-test', chatProvider: provider })
+
+      expect(memoryMocks.rememberTurn).not.toHaveBeenCalled()
+    })
+  })
+
+  it('cancels a named submission while session preparation is pending', async () => {
+    const loading = Promise.withResolvers<boolean>()
+    loadSessionMock.mockReturnValueOnce(loading.promise)
+    const store = useChatStore()
+    const submission = store.submit({ sessionId: 'session-1', messageId: 'pending-input', text: 'Stop this request' })
+    const rejected = expect(submission).rejects.toThrow('Chat turn cancelled')
+    await store.cancelTurn({ sessionId: 'session-1', turnId: 'pending-input' })
+    loading.resolve(true)
+    await rejected
+    expect(llmStreamMock).not.toHaveBeenCalled()
+    expect(sessionMessages['session-1'].some(message => message.id === 'pending-input')).toBe(false)
+  })
+
+  it('waits for the transcript of a submitted voice message instead of transcribing the file', async () => {
+    const requests: Conversation[] = []
+    llmStreamMock.mockImplementation(async (model: string, chatProvider: GenerationProvider, context: Conversation, options: LlmStreamOptions) => {
+      requests.push(await options.prepareConversation!(context, { model, providerId: options.providerId, request: chatProvider.generation(model) }))
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.submit({
+      sessionId: 'session-1',
+      messageId: 'voice-1',
+      text: '',
+      attachments: [{ type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==' }],
+      audioTranscriptPending: true,
+    })
+
+    // The message is in the chat at once. The text-only model waits for its transcript.
+    expect(sessionMessages['session-1'].some(message => message.id === 'voice-1')).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(llmStreamMock).not.toHaveBeenCalled()
+
+    await store.settleAudioTranscript({ sessionId: 'session-1', messageId: 'voice-1', transcript: 'hello there' })
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0].turns.findLast(turn => turn.type === 'user')).toMatchObject({
+      content: expect.arrayContaining([{ type: 'text', text: 'hello there' }]),
+    })
+    expect(sessionMessages['session-1'].find(message => message.id === 'voice-1')?.audioTranscripts).toEqual(['hello there'])
+  })
+
+  it('removes a submitted voice message whose transcript has no speech', async () => {
+    const store = useChatStore()
+    await store.submit({
+      sessionId: 'session-1',
+      messageId: 'voice-silent',
+      text: '',
+      attachments: [{ type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==' }],
+      audioTranscriptPending: true,
+    })
+
+    await store.settleAudioTranscript({ sessionId: 'session-1', messageId: 'voice-silent', transcript: '' })
+
+    // The turn ends without a reply or an error message.
+    expect(sessionMessages['session-1']).toEqual([{ role: 'system', content: 'system prompt', createdAt: 1, id: 'system' }])
+    expect(llmStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('uses the target character settings for a text send to another session', async () => {
+    cardSelections.set('bob', { provider: 'bob-provider', model: 'bob-model' })
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.send({ sessionId: 'session-2', text: 'For Bob' })
+
+    expect(getChatProviderInstanceMock).toHaveBeenCalledWith('bob-provider', { reasoning: 'disabled' })
+    expect(getChatProviderInstanceMock).not.toHaveBeenCalledWith('mock-provider', expect.anything())
+    expect(llmStreamMock.mock.calls[0]?.[0]).toBe('bob-model')
+    expect(activeSessionIdRef.value).toBe('session-1')
+  })
+
+  it('keeps a queued typed turn on its session character after the active card changes', async () => {
+    cardSelections.set('alice', { provider: 'alice-provider', model: 'alice-model' })
+    const firstStream = Promise.withResolvers<void>()
+    const steps: Array<{ model: string, providerId: string }> = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      if (llmStreamMock.mock.calls.length === 1)
+        await firstStream.promise
+      const step = await options.resolveStep!()
+      steps.push({ model: step.model, providerId: step.providerId })
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    const first = store.send({ sessionId: 'session-1', text: 'First' })
+    await vi.waitFor(() => expect(llmStreamMock).toHaveBeenCalledOnce())
+    const queued = store.send({ sessionId: 'session-1', text: 'Queued' })
+    await vi.waitFor(() => expect(store.pendingQueuedSendCount).toBe(1))
+
+    // Selecting another card writes its selection into the active consciousness settings.
+    activeProviderRef.value = 'selected-card-provider'
+    activeModelRef.value = 'selected-card-model'
+    try {
+      firstStream.resolve()
+      await Promise.all([first, queued])
+    }
+    finally {
+      activeModelRef.value = 'gpt-test'
+    }
+
+    expect(llmStreamMock.mock.calls[1]?.[0]).toBe('alice-model')
+    expect(steps).toEqual([
+      { model: 'alice-model', providerId: 'alice-provider' },
+      { model: 'alice-model', providerId: 'alice-provider' },
+    ])
+    expect(getChatProviderInstanceMock).not.toHaveBeenCalledWith('selected-card-provider', expect.anything())
+  })
+
+  it('reads the session character settings and prompt again before each model step', async () => {
+    cardSelections.set('alice', { provider: 'alice-provider', model: 'alice-model' })
+    sessionSystemPrompts.set('session-1', 'Alice prompt')
+    const steps: Awaited<ReturnType<NonNullable<StreamOptions['resolveStep']>>>[] = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      steps.push(await options.resolveStep!())
+      // A tool round edits the character before the next model request.
+      cardSelections.set('alice', { provider: 'official-provider', model: 'chat-auto' })
+      sessionSystemPrompts.set('session-1', 'Edited Alice prompt')
+      steps.push(await options.resolveStep!())
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.send({ sessionId: 'session-1', text: 'Use a tool' })
+
+    expect(steps[0]).toMatchObject({ model: 'alice-model', providerId: 'alice-provider', systemPrompt: 'Alice prompt\n\nPlugin toolset guidance.' })
+    expect(steps[0]?.headers).not.toHaveProperty(AIRI_CHAT_SESSION_ID_HEADER)
+    expect(steps[1]).toMatchObject({ model: 'chat-auto', providerId: 'official-provider', systemPrompt: 'Edited Alice prompt\n\nPlugin toolset guidance.' })
+    expect(steps[1]?.headers).toMatchObject({
+      [AIRI_CHAT_SESSION_ID_HEADER]: 'session-1',
+      [AIRI_CHAT_ROUND_ID_HEADER]: expect.any(String),
+    })
+    expect(getChatProviderInstanceMock).toHaveBeenLastCalledWith('official-provider', { reasoning: 'disabled' })
+  })
+
+  it('projects stored audio again when a tool step changes to a text-only model', async () => {
+    cardSelections.set('alice', { provider: 'mock-provider', model: 'audio-model' })
+    consciousnessModels.value = [
+      { id: 'audio-model', inputModalities: ['text', 'audio'], metadata: {} },
+      { id: 'text-model', inputModalities: ['text'], metadata: {} },
+    ]
+    const requests: Conversation[] = []
+    llmStreamMock.mockImplementation(async (model: string, chatProvider: GenerationProvider, context: Conversation, options: LlmStreamOptions) => {
+      requests.push(await options.prepareConversation!(context, { model, providerId: options.providerId, request: chatProvider.generation(model) }))
+      // Core passes a new conversation with the completed tool round after a scope change.
+      const continued: Conversation = { turns: [...context.turns] }
+      requests.push(await options.prepareConversation!(continued, { model: 'text-model', providerId: 'mock-provider', request: chatProvider.generation('text-model') }))
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.send({
+      sessionId: 'session-1',
+      text: '',
+      attachments: [{ type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==', transcript: 'spoken words' }],
+    })
+
+    expect(requests[0]?.turns.findLast(turn => turn.type === 'user')?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'audio' }),
+    ]))
+    expect(requests[1]?.turns.findLast(turn => turn.type === 'user')?.content).toEqual(expect.arrayContaining([
+      { type: 'text', text: 'spoken words' },
+    ]))
+    expect(requests[1]?.turns.findLast(turn => turn.type === 'user')?.content).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'audio' }),
+    ]))
+  })
+
+  it('uses the target character settings for a voice submission', async () => {
+    cardSelections.set('bob', { provider: 'bob-provider', model: 'bob-model' })
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.submit({ sessionId: 'session-2', messageId: 'bob-voice', text: 'For Bob' })
+
+    expect(getChatProviderInstanceMock).toHaveBeenCalledWith('bob-provider', { reasoning: 'disabled' })
+    expect(llmStreamMock.mock.calls[0]?.[0]).toBe('bob-model')
+    expect(activeSessionIdRef.value).toBe('session-1')
+  })
+
   it('resolves the provider and rebuilds prior tools inside the serializable send action', async () => {
     const resolvedToolNames: string[][] = []
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       const tools = typeof options.tools === 'function' ? await options.tools() : options.tools
       resolvedToolNames.push(tools.map((tool: Tool) => tool.function.name))
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -297,10 +721,500 @@ describe('chat store contract', () => {
     expect(getChatProviderInstanceMock).toHaveBeenCalledTimes(2)
     expect(getChatProviderInstanceMock).toHaveBeenCalledWith('mock-provider', { reasoning: 'disabled' })
     expect(() => structuredClone(result)).not.toThrow()
+    // The session character's wake word tool joins every turn. It is not a selectable stored tool.
     expect(resolvedToolNames).toEqual([
-      ['stage_widgets'],
-      ['stage_widgets'],
+      ['stage_widgets', 'configure_wake_words'],
+      ['stage_widgets', 'configure_wake_words'],
     ])
+  })
+
+  it('preserves image attachments when retrying a failed turn', async () => {
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+        ],
+        id: 'user-image',
+      },
+      { role: 'error', content: 'Provider failed' },
+    ]
+
+    const store = useChatStore()
+    await store.retry({ sessionId: 'session-1', index: 2 })
+
+    // The retried turn stores the image as an asset reference. The provider still receives its bytes.
+    const retried = sessionMessages['session-1'].findLast(message => message.role === 'user')
+    expect(retried.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      { type: 'image_url', image_url: { url: expect.stringMatching(/^airi-asset:[0-9a-f]{64}$/) } },
+    ])
+    const context = llmStreamMock.mock.calls.at(-1)![2] as Conversation
+    expect(context.turns.findLast(turn => turn.type === 'user')).toMatchObject({
+      content: expect.arrayContaining([expect.objectContaining({ type: 'image', url: 'data:image/png;base64,aW1hZ2U=' })]),
+    })
+  })
+
+  // ROOT CAUSE:
+  //
+  // A retry that failed before storage lost its source turn and recording.
+  // Retry cut the history, then only appended an error:
+  //
+  // setSessionMessages(sessionId, currentMessages.slice(0, sourceIndex))
+  //
+  // We fixed this by restoring the history when the storage receipt rejects.
+  it('keeps the source turn when a retry fails before its new turn is stored', async () => {
+    const recording = {
+      role: 'user',
+      content: [{ type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } }],
+      id: 'user-recording',
+    }
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      recording,
+      { role: 'error', content: 'Provider failed' },
+    ]
+    getChatProviderInstanceMock.mockResolvedValueOnce(undefined)
+
+    const store = useChatStore()
+    await expect(store.retry({ sessionId: 'session-1', index: 2 })).rejects.toThrow('Failed to resolve chat provider')
+
+    expect(sessionMessages['session-1']).toMatchObject([
+      { role: 'system', id: 'system' },
+      recording,
+      { role: 'error', content: 'Provider failed' },
+      { role: 'error', content: 'Failed to resolve chat provider "mock-provider"' },
+    ])
+    expect(llmStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels vision preprocessing when its chat turn is cancelled', async () => {
+    visionMocks.configured = true
+    let visionSignal: AbortSignal | undefined
+    visionMocks.runInference.mockImplementation(({ abortSignal }: { abortSignal?: AbortSignal }) => new Promise<string>((_resolve, reject) => {
+      visionSignal = abortSignal
+      abortSignal?.addEventListener('abort', () => reject(abortSignal.reason), { once: true })
+    }))
+
+    const store = useChatStore()
+    const sending = store.send({
+      sessionId: 'session-1',
+      text: 'Read this',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })
+    await vi.waitFor(() => expect(visionSignal).toBeDefined())
+
+    await store.cancelPendingSends('session-1')
+
+    await sending
+    expect(visionSignal?.aborted).toBe(true)
+    expect(llmStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('routes cancellation from a follower window to the leader runtime', async () => {
+    // ROOT CAUSE:
+    //
+    // The Electron chat window owns a follower-only Pinia runtime. Calling an
+    // unsynchronized cancellation action there only reached its idle local
+    // chat runtime, so the leader window kept generating the LLM response.
+    //
+    // Cancellation is now a synchronized action. The follower RPC reaches the
+    // leader-owned AbortController and waits for the active send to settle.
+    const namespace = `chat-cancellation:${crypto.randomUUID()}`
+    const leaderPinia = createPinia()
+    const leaderRuntime = createSyncedPiniaPlugin({
+      callTimeout: 1000,
+      leadership: 'leader-only',
+      namespace,
+    })
+    leaderPinia.use(leaderRuntime.plugin)
+    createApp({}).use(leaderPinia)
+
+    const followerPinia = createPinia()
+    const followerRuntime = createSyncedPiniaPlugin({
+      callTimeout: 1000,
+      leadership: 'follower-only',
+      namespace,
+    })
+    followerPinia.use(followerRuntime.plugin)
+    createApp({}).use(followerPinia)
+
+    try {
+      await vi.waitFor(() => expect(leaderRuntime.isLeader()).toBe(true))
+
+      setActivePinia(leaderPinia)
+      const leaderStore = useChatStore()
+
+      setActivePinia(followerPinia)
+      const followerStore = useChatStore()
+      await vi.waitFor(() => expect(followerRuntime.getLeaderId()).toBe(leaderRuntime.participantId))
+
+      let leaderSignal: AbortSignal | undefined
+      llmStreamMock.mockImplementationOnce(async (_model, _provider, _messages, options: StreamOptions) => {
+        leaderSignal = options.abortSignal
+        await new Promise<void>((resolve) => {
+          if (options.abortSignal?.aborted) {
+            resolve()
+            return
+          }
+          options.abortSignal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+      })
+
+      setActivePinia(followerPinia)
+      const sending = followerStore.send({
+        sessionId: 'session-1',
+        text: 'keep generating',
+      })
+      await vi.waitFor(() => expect(leaderSignal).toBeDefined())
+
+      await followerStore.cancelPendingSends('session-1')
+      await sending
+
+      expect(leaderSignal?.aborted).toBe(true)
+      expect(leaderStore.sending).toBe(false)
+    }
+    finally {
+      followerRuntime.dispose()
+      leaderRuntime.dispose()
+      disposePinia(followerPinia)
+      disposePinia(leaderPinia)
+    }
+  })
+
+  it('starts chat-model telemetry and captures the provider prompt after vision preprocessing', async () => {
+    visionMocks.configured = true
+    let resolveVision!: (description: string) => void
+    visionMocks.runInference.mockReturnValue(new Promise<string>((resolve) => {
+      resolveVision = resolve
+    }))
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    const store = useChatStore()
+    const sending = store.send({
+      sessionId: 'session-1',
+      text: 'Read this',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })
+    await vi.waitFor(() => expect(visionMocks.runInference).toHaveBeenCalledOnce())
+
+    expect(ioTracerMocks.spans.some(span => span.name === IOSpanNames.LLMInference)).toBe(false)
+    expect(llmStreamMock).not.toHaveBeenCalled()
+
+    resolveVision('A red square.')
+    await sending
+
+    expect(ioTracerMocks.spans.some(span => span.name === IOSpanNames.LLMInference)).toBe(true)
+    expect(useContextObservabilityStore().lastPromptProjection?.composedMessage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'user',
+        content: expect.stringContaining('A red square.'),
+      }),
+    ]))
+  })
+
+  it('reuses a persisted image description on later turns', async () => {
+    // ROOT CAUSE:
+    //
+    // The provider projection replaced images for one request. History kept
+    // only the image, so later turns ran vision again for the same attachment.
+    //
+    // We fixed this by storing the description with its user message. Later
+    // provider projections reuse the stored value.
+    visionMocks.configured = true
+    visionMocks.runInference.mockResolvedValue('A red square.')
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    const store = useChatStore()
+    const result = await store.send({
+      sessionId: 'session-1',
+      text: 'Read this',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })
+    await store.send({
+      sessionId: 'session-1',
+      text: 'What color was it?',
+    })
+
+    // Storing the description spread the reactive message. Its content array
+    // stayed a proxy, and `structuredClone` rejected the send result.
+    expect(() => structuredClone(result)).not.toThrow()
+    expect(visionMocks.runInference).toHaveBeenCalledOnce()
+    expect(sessionMessages['session-1'].find(message => message.role === 'user' && Array.isArray(message.content))?.imageDescriptions).toEqual([
+      {
+        description: 'A red square.',
+        imageIndex: 0,
+      },
+    ])
+  })
+
+  it('reports a failed read of the current image and stores no description', async () => {
+    // ROOT CAUSE:
+    //
+    // An earlier fix stored each failed read as the image description. A
+    // temporary failure then hid the image for good, and the send reported no error.
+    visionMocks.configured = true
+    visionMocks.runInference.mockRejectedValue(new Error('Vision inference timed out after 60000ms'))
+
+    const store = useChatStore()
+    await expect(store.send({
+      sessionId: 'session-1',
+      text: 'Read this',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })).rejects.toThrow('Vision inference timed out after 60000ms')
+
+    expect(sessionMessages['session-1'].find(message => message.role === 'user')?.imageDescriptions).toBeUndefined()
+  })
+
+  it('reads a failed earlier image once for each vision selection', async () => {
+    // ROOT CAUSE:
+    //
+    // Nothing kept a failed read, so each later turn read the same earlier
+    // image again and failed, even a text message.
+    visionMocks.configured = true
+    visionMocks.runInference.mockRejectedValue(new Error('Vision inference timed out after 60000ms'))
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    const store = useChatStore()
+    await expect(store.send({
+      sessionId: 'session-1',
+      text: 'Read this',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })).rejects.toThrow()
+    await store.send({ sessionId: 'session-1', text: 'Hello again' })
+
+    expect(visionMocks.runInference).toHaveBeenCalledOnce()
+    expect(useContextObservabilityStore().lastPromptProjection?.composedMessage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', content: expect.stringContaining('The vision model failed to read it.') }),
+    ]))
+
+    visionMocks.model = 'another-model'
+    visionMocks.runInference.mockResolvedValue('A red square.')
+    await store.send({ sessionId: 'session-1', text: 'Try again' })
+
+    expect(visionMocks.runInference).toHaveBeenCalledTimes(2)
+    expect(sessionMessages['session-1'].find(message => message.role === 'user' && Array.isArray(message.content))?.imageDescriptions)
+      .toEqual([{ description: 'A red square.', imageIndex: 0 }])
+  })
+
+  it('forgets the failed reads of a deleted session', async () => {
+    visionMocks.configured = true
+    visionMocks.runInference.mockRejectedValue(new Error('Vision inference timed out after 60000ms'))
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const imageMessage = { role: 'user', content: [{ type: 'text', text: 'Read this' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }], createdAt: 2 }
+    const store = useChatStore()
+    sessionMessages['session-1'] = [{ role: 'system', content: 'system prompt', createdAt: 1, id: 'system' }, { ...imageMessage }]
+    await store.send({ sessionId: 'session-1', text: 'Hello' })
+
+    await store.deleteSession('session-1')
+    sessionMessages['session-1'] = [{ role: 'system', content: 'system prompt', createdAt: 1, id: 'system' }, { ...imageMessage }]
+    await store.send({ sessionId: 'session-1', text: 'Hello' })
+
+    expect(visionMocks.runInference).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a failed earlier read inside its session', async () => {
+    // ROOT CAUSE:
+    //
+    // A stored message without an id gets its turn id from its position. The
+    // failed read of one session then skipped the image at that position in
+    // another session.
+    visionMocks.configured = true
+    visionMocks.runInference.mockRejectedValue(new Error('Vision inference timed out after 60000ms'))
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    for (const sessionId of ['session-1', 'session-2']) {
+      sessionMessages[sessionId] = [
+        { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+        { role: 'user', content: [{ type: 'text', text: 'Read this' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }], createdAt: 2 },
+      ]
+    }
+
+    const store = useChatStore()
+    await store.send({ sessionId: 'session-1', text: 'Hello' })
+    await store.send({ sessionId: 'session-2', text: 'Hello' })
+
+    expect(visionMocks.runInference).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads tool images with the vision model only for a chat model that cannot see them', async () => {
+    visionMocks.configured = true
+    visionMocks.runInference.mockResolvedValue('A settings window.')
+    const toolImageReaders: Array<LlmStreamOptions['describeToolImage']> = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: LlmStreamOptions) => {
+      toolImageReaders.push(options.describeToolImage)
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    const store = useChatStore()
+    await store.send({ sessionId: 'session-1', text: 'Look at my screen' })
+
+    expect(await toolImageReaders[0]?.('data:image/png;base64,aW1hZ2U=')).toBe('A settings window.')
+    expect(visionMocks.runInference).toHaveBeenCalledWith(expect.objectContaining({ workloadId: 'tool:image' }))
+  })
+
+  it('stores the description of an image that a rerun tool returns', async () => {
+    // ROOT CAUSE:
+    //
+    // The rerun entry points resolved tools without the image reader. A rerun
+    // stored the original screenshot, and the next turn sent it again.
+    visionMocks.configured = true
+    visionMocks.runInference.mockResolvedValue('A settings window.')
+    getToolsByNamesMock.mockImplementation(() => [{
+      type: 'function',
+      function: { name: 'computer_use_read_image', parameters: {} },
+      execute: async () => [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }],
+    }])
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      {
+        role: 'assistant',
+        id: 'assistant-1',
+        content: '',
+        createdAt: 2,
+        slices: [{ type: 'tool-call', toolCall: { toolCallId: 'call-1', toolCallType: 'function', toolName: 'computer_use_read_image', args: '{}' } }],
+        tool_results: [],
+      },
+    ]
+
+    await useChatStore().rerunToolCall({
+      sessionId: 'session-1',
+      messageId: 'assistant-1',
+      toolCallId: 'call-1',
+      toolName: 'computer_use_read_image',
+      args: '{}',
+      tools: [{ name: 'computer_use_read_image' }],
+    })
+
+    const stored = JSON.stringify(sessionMessages['session-1'][1])
+    expect(stored).not.toContain('data:image')
+    expect(stored).toContain('A settings window.')
+  })
+
+  it('sends a note in place of a stored tool image while the vision model reads tool images', async () => {
+    visionMocks.configured = true
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      { role: 'user', content: 'Look at my screen', createdAt: 2, id: 'user-1' },
+      storedToolImageMessage(),
+    ]
+
+    await useChatStore().send({ sessionId: 'session-1', text: 'What did you see?' })
+
+    const prompt = JSON.stringify(useContextObservabilityStore().lastPromptProjection?.composedMessage)
+    expect(prompt).not.toContain('data:image')
+    expect(prompt).toContain('A tool image was left out of the history.')
+  })
+
+  it('replays a stored tool image when no vision model reads tool images', async () => {
+    // ROOT CAUSE:
+    //
+    // The note replaced stored tool images for each model without a declared
+    // vision ability. Most catalogs omit it, so a model that sees images lost
+    // its earlier screenshots and was told that it cannot see images.
+    consciousnessModels.value = [{ id: 'gpt-test', metadata: {} }]
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      { role: 'user', content: 'Look at my screen', createdAt: 2, id: 'user-1' },
+      storedToolImageMessage(),
+    ]
+
+    await useChatStore().send({ sessionId: 'session-1', text: 'What did you see?' })
+
+    expect(JSON.stringify(useContextObservabilityStore().lastPromptProjection?.composedMessage)).not.toContain('left out')
+  })
+
+  it('leaves tool images alone when the tool image setting is off', async () => {
+    visionMocks.configured = true
+    visionMocks.useForToolImages = false
+    const toolImageReaders: Array<LlmStreamOptions['describeToolImage']> = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: LlmStreamOptions) => {
+      toolImageReaders.push(options.describeToolImage)
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    await useChatStore().send({ sessionId: 'session-1', text: 'Look at my screen' })
+
+    expect(toolImageReaders).toEqual([undefined])
+  })
+
+  it('leaves tool images to a chat model that supports vision', async () => {
+    visionMocks.configured = true
+    consciousnessModels.value = [{ id: 'gpt-test', metadata: { abilities: { vision: true } } }]
+    const toolImageReaders: Array<LlmStreamOptions['describeToolImage']> = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: LlmStreamOptions) => {
+      toolImageReaders.push(options.describeToolImage)
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    await useChatStore().send({ sessionId: 'session-1', text: 'Look at my screen' })
+
+    expect(toolImageReaders).toEqual([undefined])
+  })
+
+  it('sends images directly when the selected chat model supports vision', async () => {
+    visionMocks.configured = true
+    consciousnessModels.value = [{ id: 'gpt-test', metadata: { abilities: { vision: true } } }]
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, context: Conversation, options: StreamOptions) => {
+      expect(context.turns.some(turn => turn.type === 'user' && turn.content.some(part => part.type === 'image'))).toBe(true)
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+
+    const store = useChatStore()
+    await store.send({
+      sessionId: 'session-1',
+      text: 'Read this directly',
+      attachments: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+    })
+
+    expect(visionMocks.runInference).not.toHaveBeenCalled()
+  })
+
+  // https://github.com/moeru-ai/airi/pull/2565#discussion_r4028809145
+  it('does not restore request-only tools from session history', async () => {
+    llmStreamMock.mockImplementation(async (_model: unknown, _provider: unknown, _messages: unknown, options: StreamOptions) => {
+      if (typeof options.tools === 'function')
+        await options.tools()
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    // ROOT CAUSE:
+    // History retained tool selections and granted them to every later request.
+    // Request-only tools must be selected again, even when history mentions them.
+    const store = useChatStore()
+    await store.send({ sessionId: 'session-1', text: 'Inspect', tools: [{ name: 'computer_use' }] })
+    getToolsByNamesMock.mockClear()
+    await store.send({ sessionId: 'session-1', text: 'Continue', tools: [] })
+    expect(getToolsByNamesMock).toHaveBeenCalledWith([])
+    getToolsByNamesMock.mockClear()
+    await store.retry({ sessionId: 'session-1', index: 1 })
+    expect(getToolsByNamesMock).toHaveBeenCalledWith([])
+    await expect(store.rerunToolCall({
+      sessionId: 'session-1',
+      toolCallId: 'call-1',
+      toolName: 'computer_use',
+      args: '{}',
+      tools: [],
+    })).rejects.toThrow('Select this tool before running it again.')
   })
 
   // https://github.com/moeru-ai/airi/pull/2394#discussion_r3883162024
@@ -352,8 +1266,8 @@ describe('chat store contract', () => {
   it('passes the current consciousness reasoning option to the chat provider', async () => {
     const settings = useConsciousnessSettingsStore()
     await settings.setReasoning(true)
-    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: StreamOptions) => {
-      await options.onStreamEvent?.({ type: 'finish', finishReason: 'stop' })
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -361,6 +1275,28 @@ describe('chat store contract', () => {
 
     expect(getChatProviderInstanceMock).toHaveBeenCalledWith('mock-provider', { reasoning: 'enabled' })
     await settings.setReasoning(false)
+  })
+
+  it('passes a native reply relation to the chat runtime', async () => {
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt', createdAt: 1, id: 'system' },
+      { role: 'assistant', content: 'Earlier answer', slices: [], tool_results: [], id: 'assistant-1' },
+    ]
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+
+    await store.send({
+      sessionId: 'session-1',
+      text: 'My follow-up',
+      replyToMessageId: 'assistant-1',
+    })
+
+    expect(sessionMessages['session-1']?.find(message => message.role === 'user')).toMatchObject({
+      content: 'My follow-up',
+      replyToMessageId: 'assistant-1',
+    })
   })
 
   // https://github.com/moeru-ai/airi/issues/2085
@@ -377,8 +1313,8 @@ describe('chat store contract', () => {
       ]
       return true
     })
-    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -409,9 +1345,9 @@ describe('chat store contract', () => {
   })
 
   it('forwards one correlation identity across the action and result events', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -435,10 +1371,10 @@ describe('chat store contract', () => {
     expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledWith(expect.objectContaining(correlation))
   })
 
-  it('captures custom-provider usage once and leaves official generation capture to the server', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+  it('keeps custom and official provider usage in completed message rounds', async () => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
       await options.onUsage({
         inputTokens: 12,
         outputTokens: 8,
@@ -453,26 +1389,26 @@ describe('chat store contract', () => {
       chatProvider: provider,
     })
 
-    expect(chatAnalyticsMocks.trackAiGeneration).toHaveBeenCalledWith({
-      conversation_id: 'session-1',
-      round_id: expect.any(String),
-      provider_type: 'custom',
-      provider_id: 'mock-provider',
-      model_id: 'gpt-test',
+    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledTimes(1)
+    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-test',
       usage_source: 'reported',
       input_tokens: 12,
       output_tokens: 8,
       total_tokens: 20,
-    })
+    }))
 
-    chatAnalyticsMocks.trackAiGeneration.mockClear()
     activeProviderRef.value = 'official-provider'
     await store.ingest('official turn', {
       model: 'chat-auto',
       chatProvider: provider,
     })
 
-    expect(chatAnalyticsMocks.trackAiGeneration).not.toHaveBeenCalled()
+    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenCalledTimes(2)
+    expect(chatAnalyticsMocks.trackMessageRound).toHaveBeenLastCalledWith(expect.objectContaining({
+      model: 'chat-auto',
+      total_tokens: 20,
+    }))
     expect(llmStreamMock.mock.calls[1]?.[3]?.headers).toEqual({
       [AIRI_CHAT_APP_SURFACE_HEADER]: 'web',
       [AIRI_CHAT_SESSION_ID_HEADER]: 'session-1',
@@ -482,9 +1418,9 @@ describe('chat store contract', () => {
 
   it('uses turn_index on message_sent instead of a second-turn alias', async () => {
     activeProviderRef.value = 'official-provider'
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -510,12 +1446,12 @@ describe('chat store contract', () => {
   // ROOT CAUSE:
   //
   // One successful send emitted both the canonical message/latency events
-  // and four generic aliases, multiplying PostHog volume without adding a
+  // and four generic aliases, multiplying event volume without adding a
   // distinct product decision.
   it('does not emit redundant generic chat aliases for a successful send', async () => {
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -531,9 +1467,9 @@ describe('chat store contract', () => {
   })
 
   it('forwards later-turn failures to the canonical round failure event', async () => {
-    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'ok' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
     llmStreamMock.mockRejectedValueOnce(new Error('later turn rejected'))
 
@@ -561,6 +1497,57 @@ describe('chat store contract', () => {
     })
   })
 
+  // ROOT CAUSE:
+  //
+  // The stream store displayed received text, but a later transport failure
+  // removed it and left only the error item in durable history.
+  //
+  // The failed turn now keeps its incomplete assistant output before the error
+  // so users can read what arrived and retry the whole turn when needed.
+  it('keeps partial assistant output before the send error', async () => {
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'text-delta', text: 'partial reply' })
+      throw new Error('stream interrupted')
+    })
+
+    const store = useChatStore()
+    await expect(store.send({
+      sessionId: 'session-1',
+      text: 'show partial output',
+    })).rejects.toThrow('stream interrupted')
+
+    expect(sessionMessages['session-1']?.slice(-3)).toMatchObject([
+      { role: 'user', content: 'show partial output' },
+      { role: 'assistant', interrupted: true, content: 'partial ' },
+      { role: 'error', content: 'stream interrupted', id: expect.any(String), createdAt: expect.any(Number) },
+    ])
+
+    llmStreamMock.mockImplementationOnce(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'text-delta', text: 'complete reply' })
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    await store.retry({ sessionId: 'session-1', index: 3 })
+
+    expect(sessionMessages['session-1']?.slice(1)).toMatchObject([
+      { role: 'user', content: 'show partial output' },
+      { role: 'assistant', content: 'complete reply' },
+    ])
+  })
+
+  it('rejects retry when an error follows a completed assistant turn', async () => {
+    const store = useChatStore()
+    sessionMessages['session-1'] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'complete reply', slices: [{ type: 'text', text: 'complete reply' }], tool_results: [] },
+      { role: 'error', content: 'Provider configuration failed' },
+    ]
+
+    await expect(store.retry({ sessionId: 'session-1', index: 3 })).rejects.toThrow('Retry target has no retriable source message')
+    expect(sessionMessages['session-1']).toHaveLength(4)
+    expect(llmStreamMock).not.toHaveBeenCalled()
+  })
+
   it('keeps hook order and composes context prompt after system message', async () => {
     const contextsSnapshot = {
       'system:weather': [
@@ -576,14 +1563,14 @@ describe('chat store contract', () => {
 
     getContextsSnapshotMock.mockReturnValue(contextsSnapshot)
 
-    let composedMessages: Message[] = []
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, messages: Message[], options: any) => {
-      composedMessages = messages
+    let composedMessages: Turn[] = []
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, context: Conversation, options: any) => {
+      composedMessages = context.turns
       expect(options.waitForTools).toBe(true)
       expect(options.captureToolErrors).toBeUndefined()
 
       await options.onStreamEvent({ type: 'text-delta', text: 'hello' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -625,12 +1612,10 @@ describe('chat store contract', () => {
     expect(store.sending).toBe(false)
     expect(trackFirstMessageMock).toHaveBeenCalledOnce()
     // Datetime is no longer pushed through ingestContextMessage; it is now
-    // applied at message-assembly time as a system-prompt anchor + per-message
-    // [HH:MM] prefix. ingestContextMessage should still be called for other
-    // context providers (e.g. minecraft) when they are configured, but not
-    // for datetime in this test (minecraft is mocked to return undefined).
+    // applied at message-assembly time as per-message [HH:MM] prefixes. The
+    // runtime-rule and Minecraft providers are disabled in this test.
     expect(ingestContextMessageMock).not.toHaveBeenCalled()
-    expect(persistSessionMessagesMock).not.toHaveBeenCalled()
+    expect(persistSessionMessagesMock).toHaveBeenCalledWith('session-1')
     expect(hookOrder).toEqual([
       'before-compose',
       'after-compose',
@@ -644,8 +1629,8 @@ describe('chat store contract', () => {
     ])
 
     expect(composedMessages).toHaveLength(2)
-    expect(composedMessages[0]).toMatchObject({ role: 'system' })
-    expect(composedMessages[1]).toMatchObject({ role: 'user' })
+    expect(composedMessages[0]).toMatchObject({ type: 'system' })
+    expect(composedMessages[1]).toMatchObject({ type: 'user' })
     expect(ioTracerMocks.startSpanMock).toHaveBeenCalledWith(
       IOSpanNames.LLMInference,
       expect.anything(),
@@ -661,28 +1646,22 @@ describe('chat store contract', () => {
     expect(llmSpan.setAttribute).toHaveBeenCalledWith(IOAttributes.LLMOutputChunkLengths, [5])
     expect(llmSpan.setAttribute).toHaveBeenCalledWith(IOAttributes.LLMTextLength, 5)
 
-    // System message stays untouched: keeping it 100% static is what makes
-    // the prefix permanently KV-cache friendly across turns and across day
-    // boundaries (the date now lives inside per-message timestamp prefixes
-    // instead of a system anchor).
-    const systemContent = (composedMessages[0] as any).content
-    const systemText = typeof systemContent === 'string' ? systemContent : systemContent.map((p: any) => p.text).join('')
-    expect(systemText).toContain('system prompt')
-    expect(systemText).toContain('Plugin toolset guidance.')
-
-    // The user turn is prefixed with [YYYY-MM-DD HH:MM]. Both historic and
-    // current turns share the same shape so prefix-cache stays valid when a
-    // "current" turn becomes "historic" on the next send. Side-channel context
-    // (weather) is appended as a separate text part so providers don't see
-    // consecutive same-role messages.
-    const userMessageContent = (composedMessages[1] as any).content
-    expect(userMessageContent[0].text).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] hello from user$/)
-
-    const syntheticContextText = userMessageContent[1].text
-    expect(syntheticContextText).not.toContain('<context>')
-    expect(syntheticContextText).not.toContain('<module ')
-    expect(syntheticContextText).toContain('[Context]')
-    expect(syntheticContextText).toContain('- system:weather: sunny')
+    // The persisted system message stays unchanged. Per-message time prefixes
+    // keep the static card prompt cacheable across day boundaries.
+    if (composedMessages[0].type !== 'system' || composedMessages[1].type !== 'user')
+      throw new Error('Expected system and user turns')
+    expect(composedMessages[0].content).toEqual([
+      { type: 'text', text: 'system prompt' },
+      { type: 'text', text: '\n\nPlugin toolset guidance.' },
+    ])
+    expect(composedMessages[1].content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringMatching(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] hello from user$/),
+    })
+    expect(composedMessages[1].content[1]).toEqual({
+      type: 'runtime-context',
+      entries: [{ source: 'system:weather', text: 'sunny' }],
+    })
   })
 
   // ROOT CAUSE:
@@ -723,18 +1702,14 @@ describe('chat store contract', () => {
     store.$patch({
       sending: true,
       activeSendSessionId: 'session-b',
-      activeStreamingMessage: {
-        role: 'assistant',
-        content: 'authority stream',
-        slices: [],
-        tool_results: [],
-      },
+      activeTurns: [{ sessionId: 'session-b', turnId: 'turn-b' }],
     })
     await nextTick()
 
     expect(store.sending).toBe(true)
     expect(store.activeSendSessionId).toBe('session-b')
-    expect(store.activeStreamingMessage?.content).toBe('authority stream')
+    expect(store.activeTurns).toEqual([{ sessionId: 'session-b', turnId: 'turn-b' }])
+    expect(store.$state).not.toHaveProperty('activeStreamingMessage')
   })
 
   it('does not end the owned IO turn span when external sending mirror is cleared mid-send', async () => {
@@ -774,7 +1749,49 @@ describe('chat store contract', () => {
     expect(ioTracerMocks.activeTurnSpan.value).toBeUndefined()
   })
 
-  it('ingests runtime context providers before composing prompt snapshots', async () => {
+  it('keeps a separate interaction turn span for each concurrent session', async () => {
+    const releases = new Map<string, () => void>()
+    const llmParents = new Map<string, { name: string, end: ReturnType<typeof vi.fn> }>()
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _messages: Conversation, options: StreamOptions) => {
+      const sessionId = options.requestCorrelation!.conversationId
+      // The LLM span starts synchronously before the stream call, so it is the latest span.
+      llmParents.set(sessionId, ioTracerMocks.startSpanMock.mock.calls.at(-1)![1] as { name: string, end: ReturnType<typeof vi.fn> })
+      await new Promise<void>(resolve => releases.set(sessionId, resolve))
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    const alice = store.send({ sessionId: 'session-1', text: 'For Alice' })
+    const bob = store.send({ sessionId: 'session-2', text: 'For Bob' })
+    await vi.waitFor(() => expect(releases.size).toBe(2))
+
+    const aliceTurn = llmParents.get('session-1')
+    const bobTurn = llmParents.get('session-2')
+    expect(aliceTurn?.name).toBe(IOSpanNames.InteractionTurn)
+    expect(bobTurn?.name).toBe(IOSpanNames.InteractionTurn)
+    expect(aliceTurn).not.toBe(bobTurn)
+
+    releases.get('session-2')!()
+    await bob
+
+    expect(bobTurn?.end).toHaveBeenCalledOnce()
+    expect(aliceTurn?.end).not.toHaveBeenCalled()
+    expect(ioTracerMocks.activeTurnSpan.value).toBe(aliceTurn)
+
+    releases.get('session-1')!()
+    await alice
+
+    expect(aliceTurn?.end).toHaveBeenCalledOnce()
+    expect(ioTracerMocks.activeTurnSpan.value).toBeUndefined()
+  })
+
+  it('ingests the runtime prompt before composing prompt snapshots', async () => {
+    const runtimePromptContext = {
+      id: 'airi-runtime-prompt-context',
+      contextId: 'system:airi-runtime-prompt',
+      strategy: 'replace-self',
+      text: 'Start every reply with an ACT token.\n\nDo not use emojis.',
+      createdAt: 123,
+    }
     const minecraftContext = {
       id: 'minecraft-context',
       contextId: 'system:minecraft',
@@ -783,16 +1800,18 @@ describe('chat store contract', () => {
       text: 'player is near spawn',
       createdAt: 123,
     }
-    let composedMessages: Message[] = []
+    let composedMessages: Turn[] = []
 
+    createRuntimePromptContextMock.mockReturnValue(runtimePromptContext)
     createMinecraftContextMock.mockReturnValue(minecraftContext)
     getContextsSnapshotMock.mockReturnValue({
+      'system:airi-runtime-prompt': [runtimePromptContext],
       'system:minecraft': [minecraftContext],
     })
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, messages: Message[], options: any) => {
-      composedMessages = messages
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, context: Conversation, options: any) => {
+      composedMessages = context.turns
       await options.onStreamEvent({ type: 'text-delta', text: 'minecraft reply' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
@@ -802,17 +1821,53 @@ describe('chat store contract', () => {
       chatProvider: provider,
     })
 
-    expect(ingestContextMessageMock).toHaveBeenCalledTimes(1)
-    expect(ingestContextMessageMock).toHaveBeenCalledWith(minecraftContext)
+    expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emotion'))
+    expect(createRuntimePromptContextMock).toHaveBeenCalledWith(expect.stringContaining('base.prompt.emoji'))
+    expect(ingestContextMessageMock).toHaveBeenCalledTimes(2)
+    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(1, runtimePromptContext)
+    expect(ingestContextMessageMock).toHaveBeenNthCalledWith(2, minecraftContext)
     expect(ingestContextMessageMock.mock.invocationCallOrder[0]).toBeLessThan(
       getContextsSnapshotMock.mock.invocationCallOrder[0],
     )
-    const minecraftMessageContent = composedMessages[1]?.content
-    if (!Array.isArray(minecraftMessageContent))
-      throw new TypeError('Expected composed user message content to be an array')
-    expect(minecraftMessageContent[1]).toMatchObject({
-      text: expect.stringContaining('- system:minecraft: player is near spawn'),
+    if (composedMessages[1].type !== 'user')
+      throw new Error('Expected user turn')
+    expect(composedMessages[1].content[1]).toEqual({
+      type: 'runtime-context',
+      entries: [
+        { source: 'system:airi-runtime-prompt', text: runtimePromptContext.text },
+        { source: 'system:minecraft', text: 'player is near spawn' },
+      ],
     })
+  })
+
+  it('adds account context only to the signed-in request without retaining it in the registry', async () => {
+    const account = {
+      id: 'account',
+      contextId: 'system:user-account',
+      strategy: 'replace-self',
+      text: 'Account display name: "Alice". Edit it at /settings/account.',
+      createdAt: 123,
+    }
+    const registry = {}
+    getContextsSnapshotMock.mockReturnValue(registry)
+    createUserAccountContextMock.mockReturnValue(account)
+    const prompts: string[] = []
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, messages: Conversation, options: StreamOptions) => {
+      prompts.push(JSON.stringify(messages))
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+    await store.ingest('hello', { model: 'gpt-test', chatProvider: provider })
+    expect(prompts[0]).toContain('Alice')
+    expect(prompts[0]).toContain('/settings/account')
+    expect(registry).toEqual({})
+    expect(ingestContextMessageMock).not.toHaveBeenCalledWith(account)
+
+    createUserAccountContextMock.mockReturnValue(null)
+    await store.ingest('hello again', { model: 'gpt-test', chatProvider: provider })
+    expect(prompts[1]).not.toContain('system:user-account')
+    expect(prompts[1]).not.toContain('Alice')
+    expect(prompts[1]).not.toContain('/settings/account')
   })
 
   it('rejects cancelled queued sends before they start', async () => {
@@ -839,7 +1894,7 @@ describe('chat store contract', () => {
     await vi.waitFor(() => {
       expect(store.pendingQueuedSendCount).toBe(1)
     })
-    store.cancelPendingSends('session-1')
+    await store.cancelPendingSends('session-1')
     releaseFirstSend?.()
 
     await expect(secondSend).rejects.toThrow('Chat session was reset before send could start')
@@ -950,7 +2005,7 @@ describe('chat store contract', () => {
       },
     ])
 
-    store.cancelPendingSends('session-1')
+    await store.cancelPendingSends('session-1')
     releaseFirstSend?.()
 
     await expect(secondSend).rejects.toThrow('Chat session was reset before send could start')
@@ -992,9 +2047,9 @@ describe('chat store contract', () => {
   it('uses the forked session id and keeps the chat store contract keys', async () => {
     getContextsSnapshotMock.mockReturnValue({})
     forkSessionMock.mockResolvedValue('session-forked')
-    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: ChatProvider, _messages: Message[], options: any) => {
+    llmStreamMock.mockImplementation(async (_model: string, _chatProvider: GenerationProvider, _messages: Conversation, options: any) => {
       await options.onStreamEvent({ type: 'text-delta', text: 'fork-reply' })
-      await options.onStreamEvent({ type: 'finish', finishReason: 'stop' })
+      await options.onStreamEvent({ type: 'finish' })
     })
 
     const store = useChatStore()
