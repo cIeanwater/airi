@@ -351,12 +351,28 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     replaceSessionMessages(sessionId, next)
   }
 
-  function appendSessionMessage(sessionId: string, message: ChatHistoryItem) {
+  /** Keeps the visible append immediate, but acknowledges it only after the queued storage write completes. */
+  async function appendSessionMessage(sessionId: string, message: ChatHistoryItem): Promise<void> {
+    const meta = sessionMetas.value[sessionId]
+    if (!meta || meta.userId !== getCurrentUserId())
+      throw new Error('Cannot append a message to an unknown or foreign session')
+    const epoch = ensureActiveEpoch
+    const generation = getSessionGeneration(sessionId)
+    const owner = { userId: meta.userId, characterId: meta.characterId }
+    const appendedMessage = message.id ? message : { ...message, id: nanoid() }
     ensureSession(sessionId)
     replaceSessionMessages(sessionId, [
       ...(sessionMessages.value[sessionId] ?? []),
-      message,
-    ])
+      appendedMessage,
+    ], { persist: false })
+    await persistSession(sessionId)
+    const currentMeta = sessionMetas.value[sessionId]
+    if (epoch !== ensureActiveEpoch || owner.userId !== getCurrentUserId()
+      || !currentMeta || currentMeta.userId !== owner.userId || currentMeta.characterId !== owner.characterId
+      || generation !== getSessionGeneration(sessionId)
+      || !sessionMessages.value[sessionId]?.some(item => item.id === appendedMessage.id)) {
+      throw new Error('Chat session changed before message persistence completed')
+    }
   }
 
   /** Acknowledge a user message only after storage succeeds. Retries use its stable identity. */
@@ -1600,37 +1616,49 @@ export const useChatSessionStore = defineStore('chat-session', () => {
     return await createSession(characterId, { setActive: false, messages: nextMessages })
   }
 
+  /** Exports a stable account snapshot after queued writes settle, including visible messages whose storage write failed. */
   async function exportSessions(): Promise<ChatSessionsExport> {
+    const exportUserId = getCurrentUserId()
     if (!ready.value)
       await initialize()
+    const exportEpoch = ensureActiveEpoch
+    await persistQueue
+    if (exportUserId !== getCurrentUserId() || exportEpoch !== ensureActiveEpoch
+      || (index.value && index.value.userId !== exportUserId)) {
+      throw new Error('Account changed during chat export')
+    }
 
     if (!index.value) {
       return {
         format: 'chat-sessions-index:v1',
-        index: { userId: getCurrentUserId(), characters: {} },
+        index: { userId: exportUserId, characters: {} },
         sessions: {},
       }
     }
 
+    const exportedIndex = cloneDeep(index.value)
     const sessions: Record<string, ChatSessionRecord> = {}
-    for (const character of Object.values(index.value.characters)) {
+    for (const character of Object.values(exportedIndex.characters)) {
       for (const sessionId of Object.keys(character.sessions)) {
-        // An export leaves the device, so it carries the bytes of each image and recording in place of asset references.
-        const stored = await chatSessionsRepo.getSession(sessionId)
-        if (stored) {
-          sessions[sessionId] = { ...stored, messages: await inlineChatAssets(stored.messages) }
-          continue
-        }
         const meta = sessionMetas.value[sessionId]
         const messages = sessionMessages.value[sessionId]
-        if (meta && messages)
-          sessions[sessionId] = { meta, messages: await inlineChatAssets(messages) }
+        // Loaded history can contain a visible reply after a failed write. Prefer that copy over an older disk snapshot.
+        const record = meta && messages
+          ? { meta: cloneDeep(meta), messages: snapshotMessages(messages) }
+          : await chatSessionsRepo.getSession(sessionId)
+        if (record && record.meta.userId !== exportUserId)
+          throw new Error('Chat export contains a different account')
+        // An export leaves the device, so it carries the bytes of each image and recording in place of asset references.
+        if (record)
+          sessions[sessionId] = { ...record, messages: await inlineChatAssets(record.messages) }
+        if (exportUserId !== getCurrentUserId() || exportEpoch !== ensureActiveEpoch)
+          throw new Error('Account changed during chat export')
       }
     }
 
     return {
       format: 'chat-sessions-index:v1',
-      index: cloneDeep(index.value),
+      index: exportedIndex,
       sessions: cloneDeep(sessions),
     }
   }

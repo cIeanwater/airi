@@ -297,7 +297,7 @@ LATEST ${target === 'assistant' ? 'COMPANION RESPONSE' : 'USER INPUT'}:
             case 'inline': {
               const imageUrl = result.imageUrl || result.base64
               const content = `![${analysis.title || 'Generated Image'}](${imageUrl})`
-              chatSessionStore.appendSessionMessage(targetSessionId, {
+              await chatSessionStore.appendSessionMessage(targetSessionId, {
                 role: 'assistant',
                 content,
                 slices: [{ type: 'text', text: content }],

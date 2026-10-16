@@ -848,11 +848,13 @@ export const useChatStore = defineStore('chat', () => {
     if (!chatSession.getSessionMessagesIfLoaded(sessionId))
       return
 
-    chatSession.appendSessionMessage(sessionId, {
+    void chatSession.appendSessionMessage(sessionId, {
       role: 'error',
       content: errorMessageFrom(error) ?? 'Unknown chat operation failure',
       id: nanoid(),
       createdAt: Date.now(),
+    }).catch((storageError) => {
+      console.error('[chat] Failed to save chat operation error:', storageError)
     })
   }
 

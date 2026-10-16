@@ -69,6 +69,10 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
       sessionMessages[sessionId].push(message)
     return { status: existing ? 'existing' : 'inserted', messageId: message.id }
   })
+  const appendSessionMessage = vi.fn<ChatOrchestratorSessionPort['appendSessionMessage']>(async (sessionId, message) => {
+    sessionMessages[sessionId] ??= []
+    sessionMessages[sessionId].push(message)
+  })
 
   const runtime = createChatOrchestratorRuntime({
     session: {
@@ -77,10 +81,7 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
         sessionMessages[sessionId] ??= []
       },
       getSessionMessages: sessionId => sessionMessages[sessionId] ?? [],
-      appendSessionMessage: (sessionId, message) => {
-        sessionMessages[sessionId] ??= []
-        sessionMessages[sessionId].push(message)
-      },
+      appendSessionMessage,
       getSessionGeneration: () => generation,
     },
     context: {
@@ -126,6 +127,7 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
 
   return {
     settled,
+    appendSessionMessage,
     commitUserMessage,
     assistantAppended,
     assistantResponseRenderedError: {
@@ -170,6 +172,89 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
 }
 
 describe('createChatOrchestratorRuntime', () => {
+  it('reports a successful round only after the assistant storage write completes', async () => {
+    // ROOT CAUSE:
+    //
+    // The append boundary discarded its storage promise, so the request completed while the assistant write was still pending.
+    // The runtime now awaits durable append before completion hooks and success events.
+    const harness = createHarness()
+    const storage = Promise.withResolvers<void>()
+    harness.appendSessionMessage.mockImplementationOnce(async (sessionId, message) => {
+      harness.sessionMessages[sessionId].push(message)
+      await storage.promise
+    })
+    const request = harness.runtime.submit('Keep this answer.', { model: 'test', chatProvider: provider })
+    let completed = false
+    const done = request.done.then(() => {
+      completed = true
+    })
+    await request.accepted
+    await vi.waitFor(() => expect(harness.appendSessionMessage).toHaveBeenCalledOnce())
+    try {
+      expect(completed).toBe(false)
+      expect(harness.telemetry.messageRound).toHaveLength(0)
+      expect(harness.assistantAppended).toHaveLength(0)
+    }
+    finally {
+      storage.resolve()
+      await done
+    }
+    expect(harness.telemetry.messageRound).toHaveLength(1)
+  })
+
+  it('rejects failed assistant persistence without losing the committed user message', async () => {
+    const harness = createHarness()
+    const error = new Error('Assistant storage quota exceeded')
+    harness.appendSessionMessage.mockRejectedValueOnce(error)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const request = harness.runtime.submit('Retain the user original.', { model: 'test', chatProvider: provider })
+      await request.accepted
+      await expect(request.done).rejects.toThrow('Assistant storage quota exceeded')
+      expect(harness.sessionMessages['session-1'].find(message => message.role === 'user')?.content).toBe('Retain the user original.')
+      expect(harness.telemetry.messageRound).toHaveLength(0)
+      expect(harness.assistantAppended).toHaveLength(0)
+      expect(harness.settled).toEqual([{ sessionId: 'session-1', turnId: expect.any(String), status: 'failed' }])
+    }
+    finally {
+      logged.mockRestore()
+    }
+  })
+
+  it('preserves interrupted output once if cancellation arrives during its storage write', async () => {
+    // ROOT CAUSE:
+    //
+    // Cancellation can arrive while error recovery awaits storage. Both catch and finally then append the same reply.
+    // One preservation attempt now owns that reply, and stale completion observers do not run.
+    const harness = createHarness()
+    const storage = Promise.withResolvers<void>()
+    harness.stream.mockImplementationOnce(async (_model, _provider, _context, options) => {
+      await options?.onStreamEvent?.({ type: 'text-delta', text: 'Partial reply' })
+      throw new Error('Provider broke')
+    })
+    harness.appendSessionMessage.mockImplementationOnce(async (sessionId, message) => {
+      harness.sessionMessages[sessionId].push(message)
+      await storage.promise
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const request = harness.runtime.submit('Keep partial output.', { model: 'test', chatProvider: provider, messageId: 'partial-user' })
+      const done = expect(request.done).resolves.toBeUndefined()
+      await vi.waitFor(() => expect(harness.appendSessionMessage).toHaveBeenCalledOnce())
+      harness.runtime.cancelTurn({ sessionId: 'session-1', turnId: 'partial-user' })
+      storage.resolve()
+      await done
+      expect(harness.appendSessionMessage).toHaveBeenCalledOnce()
+      expect(harness.sessionMessages['session-1'].filter(message => message.role === 'assistant')).toHaveLength(1)
+      expect(harness.telemetry.messageRound).toHaveLength(0)
+      expect(harness.telemetry.messageRoundFailed).toHaveLength(0)
+    }
+    finally {
+      storage.resolve()
+      logged.mockRestore()
+    }
+  })
+
   it('admits a replacement turn when the cancelled provider ignores abort', async () => {
     const harness = createHarness()
     const held = Promise.withResolvers<void>()

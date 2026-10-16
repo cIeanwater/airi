@@ -8,6 +8,7 @@ node_modules
 # Local model weights for developer inference and training experiments
 /local-models/
 /AIRI_QWEN_*.json
+__pycache__/
 
 # Logs
 *.log

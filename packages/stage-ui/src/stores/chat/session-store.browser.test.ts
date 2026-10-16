@@ -318,7 +318,7 @@ describe('chat session synchronization', () => {
 
     const newSessionId = await followerChatStore.createSession('default', { setActive: false })
     await followerChatStore.setActiveSession(newSessionId)
-    followerChatStore.appendSessionMessage(newSessionId, {
+    await followerChatStore.appendSessionMessage(newSessionId, {
       id: 'first-user-message',
       role: 'user',
       content: 'Hello',

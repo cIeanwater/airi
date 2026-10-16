@@ -1,4 +1,4 @@
-import type { ChatOrchestratorSessionPort, Conversation, StreamOptions, Turn } from '@proj-airi/core-agent'
+import type { ChatHistoryItem, ChatOrchestratorSessionPort, Conversation, StreamOptions, Turn } from '@proj-airi/core-agent'
 import type { GenerationProvider } from '@proj-airi/provider-inference'
 import type { Tool } from '@xsai/shared-chat'
 import type { SyncedPiniaRuntime } from 'pinia-plugin-synced'
@@ -198,9 +198,10 @@ vi.mock('./chat/session-store', () => ({
       ensureSessionMock(sessionId)
       sessionMessages[sessionId] ??= [{ role: 'system', content: 'system prompt', createdAt: 1, id: 'system' }]
     },
-    appendSessionMessage: (sessionId: string, message: any) => {
+    appendSessionMessage: async (sessionId: string, message: ChatHistoryItem) => {
       sessionMessages[sessionId] ??= []
       sessionMessages[sessionId].push(message)
+      await persistSessionMessagesMock(sessionId)
     },
     commitUserMessage: (async (sessionId, message) => {
       sessionMessages[sessionId] ??= []

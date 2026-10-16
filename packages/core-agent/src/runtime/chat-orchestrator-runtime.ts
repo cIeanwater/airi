@@ -209,8 +209,8 @@ export interface ChatOrchestratorSessionPort {
   ensureSession: (sessionId: string) => void
   /** Returns chronological chat history for a session. */
   getSessionMessages: (sessionId: string) => ChatHistoryItem[]
-  /** Appends a finalized user/assistant/tool history item. */
-  appendSessionMessage: (sessionId: string, message: ChatHistoryItem) => void
+  /** Appends a history item and resolves after durable storage. A rejection does not undo the preceding user message. */
+  appendSessionMessage: (sessionId: string, message: ChatHistoryItem) => Promise<void>
   /** Returns a monotonic generation used to reject stale queued sends. */
   getSessionGeneration: (sessionId: string) => number
 }
@@ -693,6 +693,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     let assistantStored = false
     let generationCompleted = false
     let failed = false
+    let interruptionSaveStarted = false
 
     try {
       await hooks.emitBeforeMessageComposedHooks(sendingMessage, streamingMessageContext)
@@ -1072,14 +1073,16 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       if (!shouldAbort() && (buildingMessage.slices.length > 0 || generatedTurn?.rounds.length)) {
         const finalAssistant = buildingMessage
         finalAssistant.completedAt = now()
-        deps.session.appendSessionMessage(sessionId, finalAssistant)
+        await deps.session.appendSessionMessage(sessionId, finalAssistant)
         assistantStored = true
-        deps.onAssistantMessageAppended?.({
-          sessionId,
-          roundId,
-          message: finalAssistant,
-          messageText: fullText,
-        })
+        if (!shouldAbort()) {
+          deps.onAssistantMessageAppended?.({
+            sessionId,
+            roundId,
+            message: finalAssistant,
+            messageText: fullText,
+          })
+        }
       }
 
       if (shouldAbort())
@@ -1141,8 +1144,16 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
       if (!assistantStored && !generationCompleted && hasAssistantOutput(buildingMessage)) {
         // Keep received output local, but do not run completion hooks or cloud
         // sync for an assistant turn that never reached a terminal event.
-        deps.session.appendSessionMessage(sessionId, { ...cloneStreamingMessage(buildingMessage), interrupted: true, completedAt: now() })
+        interruptionSaveStarted = true
+        try {
+          await deps.session.appendSessionMessage(sessionId, { ...cloneStreamingMessage(buildingMessage), interrupted: true, completedAt: now() })
+        }
+        catch (storageError) {
+          console.error('Failed to save interrupted assistant response:', storageError)
+        }
       }
+      if (shouldAbort())
+        return
       resetForegroundStream(sessionId)
 
       console.error('Error sending message:', error)
@@ -1168,11 +1179,17 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
     }
     finally {
       if (!assistantStored
+        && !interruptionSaveStarted
         && !generationCompleted
         && abortSignal.aborted
         && !isStaleGeneration()
         && hasAssistantOutput(buildingMessage)) {
-        deps.session.appendSessionMessage(sessionId, { ...cloneStreamingMessage(buildingMessage), interrupted: true, completedAt: now() })
+        try {
+          await deps.session.appendSessionMessage(sessionId, { ...cloneStreamingMessage(buildingMessage), interrupted: true, completedAt: now() })
+        }
+        catch (storageError) {
+          console.error('Failed to save cancelled assistant response:', storageError)
+        }
         resetForegroundStream(sessionId)
       }
       activeSends.delete(sessionId)

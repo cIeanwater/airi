@@ -164,6 +164,159 @@ async function flushMicrotasks(rounds = 8) {
     await Promise.resolve()
 }
 
+describe('chat-session-store · durable export', () => {
+  it('rejects a queued append whose account changes before its storage task runs', async () => {
+    // ROOT CAUSE:
+    //
+    // Account changes removed queued session metadata, so persistence skipped the write but append still acknowledged it.
+    // Append now checks the account epoch, owner, generation, and message identity after storage settles.
+    const store = useChatSessionStore()
+    await store.initialize()
+    const sessionId = store.activeSessionId
+    await store.commitUserMessage(sessionId, { role: 'user', content: 'Original account user text.', id: 'original-user' })
+    const writing = Promise.withResolvers<void>()
+    const written = Promise.withResolvers<void>()
+    saveSessionMock.mockImplementationOnce(async () => {
+      writing.resolve()
+      await written.promise
+    })
+    const blocker = store.persistSessionMessages(sessionId)
+    await writing.promise
+    const append = store.appendSessionMessage(sessionId, {
+      role: 'assistant',
+      content: 'Queued old-account reply',
+      slices: [],
+      tool_results: [],
+      id: 'queued-assistant',
+    })
+    const rejected = expect(append).rejects.toThrow('Chat session changed before message persistence completed')
+    userIdRef.value = 'another-account'
+    await nextTick()
+    written.resolve()
+    await blocker
+    await rejected
+    expect(saveSessionMock.mock.calls.some(([, record]) => record.messages.some(message => message.id === 'queued-assistant'))).toBe(false)
+  })
+
+  it('rejects a late append receipt after an account change during the storage write', async () => {
+    const store = useChatSessionStore()
+    await store.initialize()
+    const sessionId = store.activeSessionId
+    const writing = Promise.withResolvers<void>()
+    const written = Promise.withResolvers<void>()
+    saveSessionMock.mockImplementationOnce(async () => {
+      writing.resolve()
+      await written.promise
+    })
+    const append = store.appendSessionMessage(sessionId, {
+      role: 'assistant',
+      content: 'Old-account reply',
+      slices: [],
+      tool_results: [],
+      id: 'late-assistant',
+    })
+    expect(store.getSessionMessages(sessionId).some(message => message.id === 'late-assistant')).toBe(true)
+    const rejected = expect(append).rejects.toThrow('Chat session changed before message persistence completed')
+    await writing.promise
+    userIdRef.value = 'another-account'
+    await nextTick()
+    written.resolve()
+    await rejected
+    expect(Object.values(store.sessionMessages).flat().some(message => message.id === 'late-assistant')).toBe(false)
+  })
+
+  it('waits for the pending assistant write and exports the latest message', async () => {
+    // ROOT CAUSE:
+    //
+    // Export read disk before queued writes completed and preferred that stale snapshot over visible history.
+    // Export now waits for persistence and captures loaded messages within the same account epoch.
+    const store = useChatSessionStore()
+    await store.initialize()
+    const sessionId = store.activeSessionId
+    const previous = structuredClone(saveSessionMock.mock.calls.at(-1)![1])
+    getSessionMock.mockResolvedValue(previous)
+    const writing = Promise.withResolvers<void>()
+    const written = Promise.withResolvers<void>()
+    saveSessionMock.mockImplementationOnce(async () => {
+      writing.resolve()
+      await written.promise
+    })
+    const append = store.appendSessionMessage(sessionId, {
+      role: 'assistant',
+      content: 'Last durable reply',
+      slices: [{ type: 'text', text: 'Last durable reply' }],
+      tool_results: [],
+      id: 'latest-assistant',
+    })
+    await writing.promise
+    let exported = false
+    const backup = store.exportSessions().then((value) => {
+      exported = true
+      return value
+    })
+    await flushMicrotasks()
+    try {
+      expect(exported).toBe(false)
+    }
+    finally {
+      written.resolve()
+      await append
+      await backup
+    }
+    expect((await backup).sessions[sessionId].messages.some(message => message.id === 'latest-assistant')).toBe(true)
+  })
+
+  it('rejects an export if the account changes while its writes are pending', async () => {
+    const store = useChatSessionStore()
+    await store.initialize()
+    const writing = Promise.withResolvers<void>()
+    const written = Promise.withResolvers<void>()
+    saveSessionMock.mockImplementationOnce(async () => {
+      writing.resolve()
+      await written.promise
+    })
+    const append = store.appendSessionMessage(store.activeSessionId, {
+      role: 'assistant',
+      content: 'Original account reply',
+      slices: [],
+      tool_results: [],
+      id: 'account-assistant',
+    })
+    const appendRejected = expect(append).rejects.toThrow('Chat session changed before message persistence completed')
+    await writing.promise
+    const backup = store.exportSessions()
+    const rejected = expect(backup).rejects.toThrow('Account changed during chat export')
+    userIdRef.value = 'another-account'
+    await nextTick()
+    written.resolve()
+    await appendRejected
+    await rejected
+  })
+
+  it('keeps the saved user original and includes a visible reply in backup after a failed assistant write', async () => {
+    const store = useChatSessionStore()
+    await store.initialize()
+    const sessionId = store.activeSessionId
+    await store.commitUserMessage(sessionId, { role: 'user', content: 'Preserve the user original.', id: 'saved-user' })
+    const previous = structuredClone(saveSessionMock.mock.calls.at(-1)![1])
+    getSessionMock.mockResolvedValue(previous)
+    saveSessionMock.mockRejectedValueOnce(new Error('Disk quota exceeded'))
+
+    await expect(store.appendSessionMessage(sessionId, {
+      role: 'assistant',
+      content: 'Visible unsaved reply',
+      slices: [],
+      tool_results: [],
+      id: 'unsaved-assistant',
+    })).rejects.toThrow('Disk quota exceeded')
+
+    const backup = await store.exportSessions()
+    expect(previous.messages.find(message => message.id === 'saved-user')?.content).toBe('Preserve the user original.')
+    expect(backup.sessions[sessionId].messages.find(message => message.id === 'saved-user')?.content).toBe('Preserve the user original.')
+    expect(backup.sessions[sessionId].messages.some(message => message.id === 'unsaved-assistant')).toBe(true)
+  })
+})
+
 describe('chat-session-store · user swap during in-flight ensureActiveSessionForCharacter', () => {
   // ROOT CAUSE: Account changes could reuse stale hydration work. The request now checks its account epoch after each await. Session loading also checks deletion before writeback.
   it('runs a fresh hydrate for the new user and discards the stale write from the old user', async () => {
@@ -619,7 +772,7 @@ describe('chat-session-store · active card prompt edits', () => {
 
     const sessionId = store.activeSessionId
     const originalSystemMessage = store.messages[0]
-    store.appendSessionMessage(sessionId, {
+    await store.appendSessionMessage(sessionId, {
       role: 'user',
       content: 'Keep this turn.',
       id: 'user-message',
