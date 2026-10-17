@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const hearingStore = useHearingStore()
-const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, endJudgeAudioEndpoint, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
+const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, endJudgeAudioEndpoint, endJudgeMaxSilenceMs, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
 const wakeWords = useWakeWordsStore()
 
 const providersStore = useProviderStore()
@@ -122,6 +122,16 @@ const pages = computed(() => [
             :label="t('settings.pages.modules.hearing.sections.section.end-judge.audio-endpoint')"
             :description="t('settings.pages.modules.hearing.sections.section.end-judge.audio-endpoint-description')"
             placeholder="http://127.0.0.1:18085/v1/turn"
+          />
+          <FieldRange
+            v-if="endJudgeEnabled && endJudgeAudioEndpoint"
+            v-model="endJudgeMaxSilenceMs"
+            :label="t('settings.pages.modules.hearing.sections.section.end-judge.max-silence')"
+            :description="t('settings.pages.modules.hearing.sections.section.end-judge.max-silence-description')"
+            :min="1200"
+            :max="10000"
+            :step="100"
+            :format-value="value => `${(value / 1000).toFixed(1)}s`"
           />
         </div>
 

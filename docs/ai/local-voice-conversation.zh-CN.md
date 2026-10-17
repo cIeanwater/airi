@@ -4,19 +4,25 @@
 
 更新日期：2026-10-17。
 
-桌面当前使用 Smart Turn v3.2 判断说话是否结束，Whisper small 转写，Qwen3.5-2B BF16 回复，Qwen3-TTS 1.7B CustomVoice 合成。
-声线为 Serena。语气使用角色基调和当前段落的 ACT 情绪指令。
+桌面当前使用 Zipformer small 中英双语流式转写、Smart Turn v3.2 判断说话是否结束、Qwen3.5-2B BF16 回复、MOSS-TTS-Nano ONNX 合成。
+默认女声音色为 Xiaoyu，另可选 Yuewen、Lingyu。语音组件使用 CPU，对话模型保持原有 BF16 GPU 推理。
+Nano 根据文字与标点产生语调，不支持自然语言情绪指令；ACT 继续驱动人物表情。
+模型选择、固定版本、实测延迟与能力边界见[轻量语音研究](research/2026-10-17-fast-local-voice.zh-CN.md)。
+完整自动对话、原桌面、直接启动与麦克风状态见[当前验收](validation/2026-10-17-fast-local-companion.zh-CN.md)。
 
 | 作用 | 当前本地服务 |
 | --- | --- |
 | 说话结束判断 | `http://127.0.0.1:18085/v1/turn`，Smart Turn v3.2 CPU |
-| 语音转写 | `http://127.0.0.1:8082/v1/`，Whisper small CPU/int8 |
+| 语音转写 | `http://127.0.0.1:18086/v1/`，`zipformer-small-zh-en-int8` CPU |
+| 实时转写 | `ws://127.0.0.1:18087/v1/stream`，在对应 Provider 配置 `localStreamingUrl` |
 | 对话 | `http://127.0.0.1:18083/v1/`，`qwen3.5-2b-bf16` |
-| 语音输出 | `http://127.0.0.1:18084/v1/`，`qwen3-tts-1.7b-customvoice`，`serena` |
+| 语音输出 | `http://127.0.0.1:18084/v1/`，`moss-tts-nano-100m`，`xiaoyu` |
 
-输入选择依据、官方中文小样本和误判记录见[输入研究](research/2026-10-17-modern-voice-input.zh-CN.md)。
-输出模型比较、音色、情绪映射、下载校验和延迟限制见[语音输出研究](research/2026-10-17-expressive-tts.zh-CN.md)。
-新方案的自动对话、实际桌面播放、活跃麦克风与显存共存已通过[完整验收](validation/2026-10-17-modern-voice.zh-CN.md)。
+此前 Whisper 与 Qwen3-TTS 1.7B 的选型和验收记录保留为历史：[输入研究](research/2026-10-17-modern-voice-input.zh-CN.md)、[输出研究](research/2026-10-17-expressive-tts.zh-CN.md)、[此前验收](validation/2026-10-17-modern-voice.zh-CN.md)。
+它们不代表当前默认速度配置。
+
+本机双击仓库根目录 `Start-Humanning.cmd` 即可启动。入口会复用健康服务，保留原桌面 profile 和聊天数据。
+当前仍是源码运行，需要已有 Node/pnpm 依赖、Python 环境与权重；不是独立安装包。
 
 准备好各服务的运行环境和权重后，在仓库根目录运行：
 
@@ -30,6 +36,13 @@ python scripts/start-local-voice.py
 `--check` 只检查文件路径。服务启动时另行校验模型权重。
 其他目录通过 `--tools-dir` 与 `--models-dir` 指定。
 只启动服务时使用 `--services-only`。
+
+默认开启本地模式，不需要账号登录。账号、云同步、官方托管 Provider 和产品遥测入口已关闭。
+切换模型时要同时保存当前角色卡的语音设置和全局设置。本机已完成此项。
+本地 ASR/TTS 的 API Key 填 `local` 作为兼容占位值，两者只监听回环地址，不向外提供服务。
+若要恢复旧 Qwen3-TTS 1.7B，先停止占用 `18084` 的 Nano 服务，再按历史文档启动；不要让两者抢同一端口。
+
+开发工具的两个 V 浮标默认关闭。只有显式设置 `AIRI_VUE_DEVTOOLS=true` 后重新启动开发服务器才会出现。
 
 统一入口按本机当前配置开启完整消息 JSON，保存至父目录 `.tools/airi-message-records`。
 默认保留七天内最新 1,000 份。使用 `--no-message-recording` 可关闭此项。
@@ -113,10 +126,12 @@ python .\scripts\serve-local-kokoro.py --runtime-dir D:\path\to\Kokoro-FastAPI-0
 
 ## 自动发送与停顿
 
-本机已启用自动发送，输入模式为 `always-on`，语音改写和结束判断开启。
+本机已启用自动发送，输入模式为 `always-on`，结束判断开启，语音改写关闭。
+改写会额外调用一次聊天模型，不适合作为低延迟默认。转写文字仍可手动修改。
 音频判断服务在约 600 ms 停顿后读取本轮末尾最多八秒的声音，判断语句是否结束。
-未完成时继续等待。续说会取消旧判断，六秒静音为安全上限。
-它在批量转写出字前工作，不需要先结束录音才能得到判断。
+未完成时继续等待。续说会取消旧判断；当前速度配置最多等待两秒静音。
+设置 → 模块 → 听觉可调整最长静音等待，普通默认仍为六秒，适合说话中有长停顿的情况。
+音尾判断直接读音频，不需要先等转写出字。
 模型存在误判，详细结果见输入研究文档。
 
 关闭音频语义判断时，原静音模式继续使用配置中的 2,000 ms 发送延迟。

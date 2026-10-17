@@ -73,6 +73,16 @@ describe('steam onboarding provider restrictions', () => {
 })
 
 describe('desktop onboarding sign-in', () => {
+  it('offers local model setup without login, pricing, or account terms in local mode', async () => {
+    vi.stubEnv('VITE_AIRI_LOCAL_MODE', 'true')
+    const screen = await renderWelcomeStep(false)
+
+    await expect.element(screen.getByRole('button', { name: 'Configure local models' })).toBeVisible()
+    expect(document.body.textContent).not.toContain('Sign in')
+    expect(document.body.textContent).not.toContain('Pricing')
+    expect(document.body.textContent).not.toContain('Terms')
+  })
+
   it('requests login through the auth store', async () => {
     vi.stubEnv('RUNTIME_ENVIRONMENT', 'electron')
     const pinia = createPinia()

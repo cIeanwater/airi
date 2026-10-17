@@ -14,12 +14,24 @@ concurrency:
 
 jobs:
   upload-translations-to-crowdin:
+    if: ${{ github.repository == 'moeru-ai/airi' || vars.ENABLE_CROWDIN_SYNC == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check Crowdin configuration
+        env:
+          CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+          CROWDIN_PROJECT_ID: ${{ vars.CROWDIN_PROJECT_ID }}
+        run: |
+          test -n "$CROWDIN_PERSONAL_TOKEN" || { echo '::error::Set your CROWDIN_PERSONAL_TOKEN secret before syncing.'; exit 1; }
+          if [[ "$GITHUB_REPOSITORY" != 'moeru-ai/airi' ]] && ! [[ "$CROWDIN_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+            echo '::error::Set CROWDIN_PROJECT_ID to your own project before enabling fork translation sync.'
+            exit 1
+          fi
       - uses: actions/checkout@v7
       # NOTICE: Uploading local translations to Crowdin can overwrite remote changes and discard pending sync work. Run only when intentionally pushing the repo state upstream. See https://github.com/moeru-ai/airi/pull/813#issuecomment-3669328994 and https://support.crowdin.com/enterprise/github-integration/ (explained by @typed-sigterm); Mastodon follows a similar flow.
       - uses: crowdin/github-action@v3
         with:
+          project_id: ${{ vars.CROWDIN_PROJECT_ID }}
           upload_sources: false
           upload_translations: true
           # The sync exports only approved translations, so an upload must approve what it

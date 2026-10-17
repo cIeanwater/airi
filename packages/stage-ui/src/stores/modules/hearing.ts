@@ -19,6 +19,7 @@ import { computed, ref, toRaw, watch } from 'vue'
 
 import { useAnalytics } from '../../composables/use-analytics'
 import { createHearingTranscriber } from '../../libs/audio/hearing-transcriber'
+import { streamLocalTranscription } from '../../libs/audio/local-streaming-transcription'
 import { OFFICIAL_TRANSCRIPTION_PROVIDER_ID } from '../../libs/providers'
 import { APPLE_SPEECH_TRANSCRIPTION_PROVIDER_ID, executeAppleSpeechStream } from '../../libs/providers/providers/apple-speech'
 import { executeSherpawStream, SHERPAW_TRANSCRIPTION_PROVIDER_ID } from '../../libs/providers/providers/sherpaw'
@@ -333,12 +334,13 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const autoSendEnabled = useLocalStorageManualReset<boolean>('settings/hearing/auto-send-enabled', false, persistenceOptions)
   const autoSendDelay = useLocalStorageManualReset<number>('settings/hearing/auto-send-delay', 2000, persistenceOptions) // Default 2 seconds
   const confidenceThreshold = useLocalStorageManualReset<number>('settings/hearing/confidence-threshold', CONFIDENCE_THRESHOLD_DISABLED, persistenceOptions)
-  // Rephrasing sends transcripts to a chat model. Voice input already sends them to that model, so it is on by default.
-  const rephraseEnabled = useLocalStorageManualReset<boolean>('settings/hearing/rephrase-enabled', true, persistenceOptions)
+  // An extra chat-model pass delays every voice turn. Transcript editing remains available in the composer.
+  const rephraseEnabled = useLocalStorageManualReset<boolean>('settings/hearing/rephrase-enabled', false, persistenceOptions)
   // A chat model reads paused transcripts and ends finished messages before the silence limit.
   const endJudgeEnabled = useLocalStorageManualReset<boolean>('settings/hearing/end-judge-enabled', true, persistenceOptions)
   // A selected local endpoint judges raw audio. An empty endpoint selects transcript judgement.
   const endJudgeAudioEndpoint = useLocalStorageManualReset('settings/hearing/end-judge-audio-endpoint', '', persistenceOptions)
+  const endJudgeMaxSilenceMs = useLocalStorageManualReset<number>('settings/hearing/end-judge-max-silence-ms', 6000, persistenceOptions)
   // An empty provider uses the chat model of the consciousness module.
   const rephraseProvider = useLocalStorageManualReset('settings/hearing/rephrase-provider', '', persistenceOptions)
   const rephraseModel = useLocalStorageManualReset('settings/hearing/rephrase-model', '', persistenceOptions)
@@ -417,6 +419,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     rephraseEnabled.reset()
     endJudgeEnabled.reset()
     endJudgeAudioEndpoint.reset()
+    endJudgeMaxSilenceMs.reset()
     rephraseProvider.reset()
     rephraseModel.reset()
   }
@@ -562,6 +565,13 @@ export const useHearingStore = defineStore('hearing-store', () => {
   function createTranscriber(providerId = activeTranscriptionProvider.value): StreamingTranscriber {
     const config = structuredClone(toRaw(providerStore.getProviderConfig(providerId) ?? {}))
     const model = resolveActiveTranscriptionModel(activeTranscriptionModel.value, config)
+    if (typeof config.localStreamingUrl === 'string' && config.localStreamingUrl.trim()) {
+      const endpoint = config.localStreamingUrl.trim()
+      return createHearingTranscriber(async (audio, signal) => ({
+        mode: 'stream',
+        ...streamLocalTranscription(endpoint, model, new Pcm16Encoder(audio, { sampleRate: 16000, signal }).stream, signal),
+      }))
+    }
     const threshold = confidenceThreshold.value
     const providerOptions = resolveTranscriptionProviderOptions(config)
     const features = providersStore.getTranscriptionFeatures(providerId)
@@ -639,6 +649,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     rephraseEnabled,
     endJudgeEnabled,
     endJudgeAudioEndpoint,
+    endJudgeMaxSilenceMs,
     rephraseProvider,
     rephraseModel,
     verboseJsonNotSupported,

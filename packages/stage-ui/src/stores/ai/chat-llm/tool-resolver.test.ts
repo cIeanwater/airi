@@ -1,20 +1,30 @@
 import type { Tool } from '@xsai/shared-chat'
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createSparkCommandTool } from '@proj-airi/core-agent/agents/spark-command'
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveLlmTools, toolNameFrom } from './tool-resolver'
+import { useLlmToolsStore } from './tools'
 
 // The default (non-injected) web-search branch reads the module store and the
 // tools barrel; mock both so the configured-gate + key-trim logic can be
 // exercised without real Pinia state or a live Tavily factory.
-const { createWebSearchToolsMock, useWebSearchStoreMock } = vi.hoisted(() => ({
+const { createWebSearchToolsMock, useWebSearchStoreMock, mcpMock, debugMock } = vi.hoisted(() => ({
   createWebSearchToolsMock: vi.fn(),
   useWebSearchStoreMock: vi.fn(),
+  mcpMock: vi.fn<() => Promise<Tool[]>>(),
+  debugMock: vi.fn<() => Promise<Tool[]>>(),
 }))
 
 vi.mock('../../../tools', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>
-  return { ...actual, createWebSearchTools: createWebSearchToolsMock }
+  return { ...actual, createWebSearchTools: createWebSearchToolsMock, mcp: mcpMock, debug: debugMock }
+})
+
+vi.mock('@proj-airi/core-agent/agents/spark-command', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@proj-airi/core-agent/agents/spark-command')>()
+  return { ...actual, createSparkCommandTool: vi.fn(actual.createSparkCommandTool) }
 })
 
 vi.mock('../../modules/web-search', () => ({
@@ -57,6 +67,89 @@ describe('toolNameFrom', () => {
 })
 
 describe('resolveLlmTools', () => {
+  describe('deployment tool defaults', () => {
+    beforeEach(() => {
+      setActivePinia(createPinia())
+      vi.stubEnv('VITE_AIRI_LOCAL_MODE', 'true')
+      mcpMock.mockReset().mockResolvedValue([createTool('default_mcp')])
+      debugMock.mockReset().mockResolvedValue([createTool('default_debug')])
+      vi.mocked(createSparkCommandTool).mockClear()
+      useModsServerChannelStoreMock.mockReset().mockReturnValue({ send: sendSparkCommandEventMock })
+      createWebSearchToolsMock.mockReset()
+      useWebSearchStoreMock.mockReset().mockReturnValue({ configured: false, apiKey: '' })
+    })
+
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('skips implicit factories locally and keeps custom and registered active tools', async () => {
+      const customTool = createTool('request_tool')
+      const activeTool = createTool('registered_wakeword')
+      useLlmToolsStore().addTools({ ...activeTool, id: 'wakeword' })
+
+      const tools = await resolveLlmTools({ customTools: async () => [customTool] })
+
+      expect(tools.map(toolNameFrom)).toEqual(['request_tool', 'registered_wakeword'])
+      expect(tools[1].execute).toBe(activeTool.execute)
+      expect(mcpMock).not.toHaveBeenCalled()
+      expect(debugMock).not.toHaveBeenCalled()
+      expect(createSparkCommandTool).not.toHaveBeenCalled()
+      expect(useModsServerChannelStoreMock).not.toHaveBeenCalled()
+    })
+
+    it('preserves explicitly supplied sources in local mode', async () => {
+      const builtInTool = createTool('explicit_mcp')
+      const debugTool = createTool('explicit_debug')
+      const sparkTool = createTool('explicit_spark')
+      const webSearchTool = createTool('explicit_search')
+      const customTool = createTool('request_tool')
+      const activeTool = createTool('active_tool')
+      const builtInTools = vi.fn(async () => [builtInTool])
+      const debugTools = vi.fn(async () => [debugTool])
+      const sparkCommandTools = vi.fn(async () => [sparkTool])
+
+      const tools = await resolveLlmTools({
+        builtInTools,
+        debugTools,
+        sparkCommandTools,
+        webSearchTools: [webSearchTool],
+        customTools: [customTool],
+        activeTools: [activeTool],
+      })
+
+      expect(tools).toEqual([builtInTool, debugTool, sparkTool, webSearchTool, customTool, activeTool])
+      expect(builtInTools).toHaveBeenCalledOnce()
+      expect(debugTools).toHaveBeenCalledOnce()
+      expect(sparkCommandTools).toHaveBeenCalledOnce()
+      expect(useModsServerChannelStoreMock).not.toHaveBeenCalled()
+      expect(useWebSearchStoreMock).not.toHaveBeenCalled()
+    })
+
+    it('keeps configured web search in local mode', async () => {
+      const webSearchTool = createTool('configured_search')
+      useWebSearchStoreMock.mockReturnValue({ configured: true, apiKey: '  configured-key\n' })
+      createWebSearchToolsMock.mockResolvedValue([webSearchTool])
+
+      const tools = await resolveLlmTools({ activeTools: [] })
+
+      expect(tools).toEqual([webSearchTool])
+      expect(createWebSearchToolsMock).toHaveBeenCalledWith({ apiKey: 'configured-key' })
+    })
+
+    it('keeps implicit factories in connected mode', async () => {
+      vi.stubEnv('VITE_AIRI_LOCAL_MODE', 'false')
+
+      const tools = await resolveLlmTools({ activeTools: [] })
+
+      expect(tools.map(toolNameFrom)).toEqual(['default_mcp', 'default_debug', 'builtIn_emitSparkCommand'])
+      expect(mcpMock).toHaveBeenCalledOnce()
+      expect(debugMock).toHaveBeenCalledOnce()
+      expect(createSparkCommandTool).toHaveBeenCalledOnce()
+      expect(useModsServerChannelStoreMock).toHaveBeenCalledOnce()
+    })
+  })
+
   it('reads the images of every tool when it receives an image reader', async () => {
     const screenshot = [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }]
     const builtInTool = { ...createTool('builtIn_mcpCallTool'), execute: async () => screenshot }

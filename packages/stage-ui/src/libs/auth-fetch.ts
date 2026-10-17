@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores/auth'
+import { isLocalMode } from './deployment'
 import { getAnalyticsIdentitySnapshot } from './product-signals'
 import { SERVER_URL } from './server'
 
@@ -22,6 +23,8 @@ export async function authedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  if (isLocalMode())
+    throw new Error('Hosted account services are disabled in local mode')
   const authStore = useAuthStore()
   const version = authStore.sessionVersion
   const doFetch = (token: string | null): Promise<Response> => {

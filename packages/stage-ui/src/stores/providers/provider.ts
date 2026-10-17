@@ -14,6 +14,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { isLocalMode } from '../../libs/deployment'
 import {
   CHAT_COMPLETIONS_VALIDATOR_ID,
   getProviderValidationIntervalMs,
@@ -874,12 +875,14 @@ export const useProviderStore = defineStore('provider', () => {
   // Get all provider metadata in registry order for the settings page.
   const allProvidersMetadata = computed(() => {
     const definitions = definedProviders
+      .filter(definition => !isLocalMode() || definition.configuredBy !== 'authentication')
       .filter(d => providerMetadata.value[d.id])
       .map(d => projectProvider(d.id))
       .filter(metadata => metadata !== undefined)
     // Vision providers reuse chat definitions under separate instance ids.
     // Include these generated definitions before configured custom instances.
     const visionDefinitions = definedProviders
+      .filter(definition => !isLocalMode() || definition.configuredBy !== 'authentication')
       .filter(definition => providerMetadata.value[definition.id]?.category === 'chat')
       .map(definition => projectProvider(`${VISION_PROVIDER_ID_PREFIX}${definition.id}`))
       .filter(metadata => metadata !== undefined)
@@ -887,6 +890,8 @@ export const useProviderStore = defineStore('provider', () => {
 
     const configuredInstances: ProviderMetadata[] = []
     for (const providerId of Object.keys(providerConfigStore.providers)) {
+      if (isLocalMode() && findProviderDefinition(providerId)?.configuredBy === 'authentication')
+        continue
       if (definitionIds.has(providerId))
         continue
 
@@ -915,6 +920,8 @@ export const useProviderStore = defineStore('provider', () => {
   async function getProviderInstance<R extends ProviderInstance>(providerId: string): Promise<R> {
     await waitForProviderMetadata()
     const definition = getProviderDefinition(providerId)
+    if (isLocalMode() && definition.configuredBy === 'authentication')
+      throw new Error('Hosted model providers are disabled in local mode')
 
     // Providers that don't require credentials use empty config
     let config = providerCredentials.value[providerId]

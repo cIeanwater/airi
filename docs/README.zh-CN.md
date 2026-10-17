@@ -19,9 +19,10 @@ AIRI 提供应用框架、角色渲染与模型 Provider 接口。本仓库重�
 | 语音对话 | 随应用分发的离线 VAD、停顿后自动提交、语音播放和完整链路回归 | [语音对话配置](ai/local-voice-conversation.zh-CN.md) |
 | 角色互动 | 情绪与动作标记、有效动作选择、Live2D 表情和随音频变化的口型 | [表情联动验收](ai/validation/2026-10-17-voice-expression-link.zh-CN.md) |
 
-当前本机已启用 Smart Turn v3.2 与 Qwen3-TTS-1.7B CustomVoice，默认 Serena 声线。
-自动发送、实际播放及 ACT 语气接线已通过[完整闭环验收](ai/validation/2026-10-17-modern-voice.zh-CN.md)。
-当前语音合成仍慢于播放速度，音尾模型存在误判。配置与限制见研究文档。
+当前本机使用约 60 MB 的中英双语流式 Zipformer 转写、Smart Turn v3.2 判断停顿、MOSS-TTS-Nano ONNX 合成女声。
+语音组件在 CPU 上运行，Qwen3.5-2B 保持 BF16 参数并使用 GPU。
+已知中文文本的桌面试听约 314 ms 开始播放；这不含识别与对话模型耗时。[研究与实测](ai/research/2026-10-17-fast-local-voice.zh-CN.md)记录模型取舍。
+ACT 控制人物表情。Nano 根据文字与标点生成语调，不接受情绪指令。
 
 ## 消息、记忆与数据沉淀
 
@@ -55,6 +56,10 @@ pnpm install
 pnpm dev:tamagotchi
 ```
 
+在已准备好的本机 Windows 环境中，双击根目录 **`Start-Humanning.cmd`** 即可一起启动本地模型服务与桌面。
+它会复用健康服务和原桌面数据目录。[启动说明](ai/local-voice-conversation.zh-CN.md)记录准备条件与配置。
+默认本地模式关闭登录、账号同步、官方托管 Provider 和产品遥测。开发者可显式设置 `VITE_AIRI_LOCAL_MODE=false` 恢复联网账号功能。
+
 或启动浏览器应用：
 
 ```sh
@@ -66,6 +71,7 @@ pnpm dev:web
 服务文档中的绝对路径描述已验收的本机环境，其他设备需要替换路径。
 
 本分支尚无单独验收的安装包。上游 AIRI 安装包不包含本仓库的这些改动。
+继承的 Cloudflare 云部署需显式启用并配置自己的凭据，见 [GitHub Actions 说明](ai/local-deployment-and-github-actions.zh-CN.md)。
 
 ## 评测与开发
 
@@ -75,6 +81,7 @@ LongMemEval-S 应用预算使用六个证据块，在 470 道可回答问题上�
 
 近期验收记录：
 
+- [轻量流式语音、直接启动与免登录](ai/validation/2026-10-17-fast-local-companion.zh-CN.md)
 - [音频、模型回复与持久化](ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)
 - [离线语音检测](ai/validation/2026-10-17-offline-voice-detection.zh-CN.md)
 - [语音回合结束判断](ai/adr/2026-10-17-voice-turn-completion.zh-CN.md)

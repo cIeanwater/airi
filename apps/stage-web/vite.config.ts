@@ -265,7 +265,7 @@ export default defineConfig({
 
     // Browser tests mount short-lived apps. A delayed DevTools setup can run
     // after the test app is gone, so only load this plugin for the real app.
-    ...(env.VITEST ? [] : [VueDevTools()]),
+    ...(!env.VITEST && env.AIRI_VUE_DEVTOOLS === 'true' ? [VueDevTools()] : []),
 
     transformersAssets(),
     // Web exposes pinned remote models. The browser downloads only the selected model.

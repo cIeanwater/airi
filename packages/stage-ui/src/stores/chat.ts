@@ -666,7 +666,12 @@ export const useChatStore = defineStore('chat', () => {
     getActiveProvider: () => activeProvider.value,
     getSystemPromptSupplement: () => llmToolsetPromptsStore.activeToolsetPrompt,
     runtimeContextProviders: [
-      () => createRuntimePromptContext(runtimePrompt.value),
+      (sessionId) => {
+        const characterId = chatSession.sessionMetas[sessionId]?.characterId ?? cardStore.activeCardId ?? 'default'
+        // The compact built-in prompt already carries the complete ACT contract.
+        // Custom session owners retain the full runtime prompt, even in the background.
+        return createRuntimePromptContext(cardStore.usesLocalConversationPrompt(characterId) ? '遵循角色提示中的 ACT 格式，开头只使用一次情绪标记。' : runtimePrompt.value)
+      },
       createMinecraftContext,
     ],
     createId: nanoid,

@@ -12,6 +12,7 @@ import { useBreakpoints } from '../composables/use-breakpoints'
 import { triggerSignIn } from '../libs/auth'
 import { authClient, requestAuthSession } from '../libs/auth-client'
 import { refreshAccessToken } from '../libs/auth-oidc'
+import { isLocalMode } from '../libs/deployment'
 import { SERVER_URL } from '../libs/server'
 
 function createLocalStorageForAuth() {
@@ -83,8 +84,8 @@ export const useAuthStore = defineStore('auth', () => {
   // what lets the OIDC provider locate the server-side session row to delete
   // — without this we'd be back to relying on cross-site session cookies.
   const idToken = ref<string | null>(null)
-  const isAuthenticated = computed(() => !!user.value && !!session.value)
-  const userId = computed(() => user.value?.id ?? 'local')
+  const isAuthenticated = computed(() => !isLocalMode() && !!user.value && !!session.value)
+  const userId = computed(() => isLocalMode() ? 'local' : user.value?.id ?? 'local')
 
   // --- OIDC token refresh state ---
   const oidcClientId = ref<string | null>(null)
@@ -165,6 +166,8 @@ export const useAuthStore = defineStore('auth', () => {
    * @param expectedVersion Session version captured by the caller. Defaults to the current version.
    */
   async function refreshTokenNow(expectedVersion = sessionVersion.value): Promise<string | null> {
+    if (isLocalMode())
+      return null
     if (expectedVersion !== sessionVersion.value || signingOut)
       return null
     if (inflightRefresh)
@@ -257,6 +260,11 @@ export const useAuthStore = defineStore('auth', () => {
 
     initialized.value = true
 
+    // Leave persisted credentials and old account-scoped data untouched. Local
+    // mode uses the existing anonymous scope and never restores remote identity.
+    if (isLocalMode())
+      return
+
     token.value = storage.getAccessToken()
     refreshToken.value = storage.getRefreshToken()
     idToken.value = storage.getIdToken()
@@ -277,6 +285,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function completeSignIn(tokens: AuthTokenSet): Promise<boolean> {
+    if (isLocalMode())
+      return false
     sessionVersion.value += 1
     inflightRefresh = null
     signingOut = false
@@ -298,6 +308,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function fetchSession(accessToken: string | null = token.value): Promise<boolean> {
+    if (isLocalMode())
+      return false
     if (signingOut || accessToken !== token.value)
       return false
     const version = sessionVersion.value
@@ -317,6 +329,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function listSessions() {
+    if (isLocalMode())
+      return { data: [], error: null }
     return await authClient.listSessions({
       fetchOptions: {
         auth: {
@@ -328,6 +342,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function signOut(): Promise<void> {
+    if (isLocalMode())
+      return
     const idTokenHint = idToken.value
     const clientId = oidcClientId.value
     const bearerToken = token.value
@@ -397,6 +413,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Grants one renderer ownership of a shared login request. */
   async function consumeLoginRequest(): Promise<boolean> {
+    if (isLocalMode())
+      return false
     if (!needsLogin.value || isAuthenticated.value)
       return false
     needsLogin.value = false
@@ -405,6 +423,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Publishes a login request on the leader before any renderer can consume it. */
   async function requestLogin(): Promise<void> {
+    if (isLocalMode())
+      return
     if (isAuthenticated.value)
       return
     needsLogin.value = true
@@ -412,6 +432,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Requests sign-in only if the failed request still belongs to this session. */
   async function expireSession(expectedVersion: number): Promise<void> {
+    if (isLocalMode())
+      return
     if (expectedVersion !== sessionVersion.value || signingOut)
       return
     sessionVersion.value += 1

@@ -8,6 +8,7 @@ import { PiniaColada } from '@pinia/colada'
 import { pushToTalkTriggerKey } from '@proj-airi/stage-ui/composables/push-to-talk-trigger'
 import { trackButtonPlugin } from '@proj-airi/stage-ui/directives/track-button'
 import { browserAuthorizationHandler, registerAuthorizationHandler } from '@proj-airi/stage-ui/libs/auth'
+import { isHostedRoute, isLocalMode } from '@proj-airi/stage-ui/libs/deployment'
 import { piniaPluginTracing, setupSynced } from '@proj-airi/stage-ui/libs/pinia'
 import { configureAnalyticsAdapter } from '@proj-airi/stage-ui/libs/product-signals'
 import { MotionPlugin } from '@vueuse/motion'
@@ -61,6 +62,8 @@ const router = createRouter({
   // TODO: vite-plugin-vue-layouts is long deprecated, replace with another layout solution
   routes: setupLayouts(routes as RouteRecordRaw[]),
 })
+
+router.beforeEach(to => isLocalMode() && isHostedRoute(to.path) ? { path: to.path.startsWith('/settings') ? '/settings' : '/', replace: true } : undefined)
 
 if (import.meta.hot) {
   handleHotUpdate(router, (updatedRoutes) => {

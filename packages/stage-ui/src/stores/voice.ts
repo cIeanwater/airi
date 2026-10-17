@@ -456,9 +456,9 @@ export const useVoiceStore = defineStore('voice', () => {
       detectWakeWord: options.detectWakeWord ?? wakeWords?.detect,
       enabled: () => !voiceMessages.isRecording,
       silenceMs: () => {
-        // Audio semantics work before batch ASR returns text. Six seconds bounds an incomplete or failed judgement.
+        // A shorter safety limit trades long thinking pauses for lower latency when the semantic result is incomplete.
         if (hearing.endJudgeEnabled && hearing.endJudgeAudioEndpoint)
-          return 6000
+          return Math.max(1200, Math.min(10_000, hearing.endJudgeMaxSilenceMs || 6000))
         const hasLiveTranscript = !!controller.activeInput?.input?.transcript.raw.text.trim()
         return endPauseMs() + (hearing.endJudgeEnabled && hasLiveTranscript ? VOICE_END_SILENCE.graceMs : 0)
       },

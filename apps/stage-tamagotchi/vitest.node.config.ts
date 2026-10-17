@@ -11,7 +11,7 @@ export default defineProject({
   plugins: [Info(), vue()],
   test: {
     name: 'stage-tamagotchi:node',
-    env: loadEnv('test', cwd(), ''),
+    env: { ...loadEnv('test', cwd(), ''), VITE_AIRI_LOCAL_MODE: 'false' },
     include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
     exclude: ['src/**/*.browser.test.ts', '**/node_modules/**', '**/.git/**'],
     fileParallelism: false,

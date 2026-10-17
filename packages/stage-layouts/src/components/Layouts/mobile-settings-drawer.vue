@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isLocalMode } from '@proj-airi/stage-ui/libs/deployment'
 import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { Avatar, BasicButton, BottomDrawer, Checkbox, GhostButton, SelectTab, useTheme } from '@proj-airi/ui'
 import { useEventListener } from '@vueuse/core'
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 }>()
 const characterVoiceEnabled = defineModel<boolean>('characterVoiceEnabled', { required: true })
 const { t } = useI18n()
+const localMode = isLocalMode()
 const { themeMode } = useTheme()
 const authStore = useAuthStore()
 const { isAuthenticated, user } = storeToRefs(authStore)
@@ -91,7 +93,7 @@ function finishSettingsClose() {
       </BasicButton>
     </template>
     <div :class="['mobile-settings-actions select-none', keyboardNavigation && 'keyboard-navigation']">
-      <div :class="['mb-4 overflow-hidden rounded-2xl bg-white dark:bg-neutral-800/60']">
+      <div v-if="!localMode" :class="['mb-4 overflow-hidden rounded-2xl bg-white dark:bg-neutral-800/60']">
         <GhostButton
           block size="unset"
           :class="[

@@ -34,6 +34,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    env: { VITE_AIRI_LOCAL_MODE: 'false' },
     include: ['src/**/*.browser.test.ts'],
     browser: {
       enabled: true,

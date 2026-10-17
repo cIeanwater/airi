@@ -7,6 +7,7 @@ import type { DescribeToolImage } from './tool-images'
 import { createSparkCommandTool } from '@proj-airi/core-agent/agents/spark-command'
 import { uniqBy } from 'es-toolkit'
 
+import { isLocalMode } from '../../../libs/deployment'
 import { createWebSearchTools, debug, mcp } from '../../../tools'
 import { useModsServerChannelStore } from '../../mods/api/channel-server'
 import { useWebSearchStore } from '../../modules/web-search'
@@ -25,20 +26,20 @@ export interface ResolveLlmToolsOptions {
   /**
    * MCP-backed built-in tools.
    *
-   * @default mcp()
+   * @default mcp() in connected mode; none in local mode
    */
   builtInTools?: ToolSource
   /**
    * Debug tools exposed to the LLM.
    *
-   * @default debug()
+   * @default debug() in connected mode; none in local mode
    */
   debugTools?: ToolSource
   /**
    * Spark command tools. Supplying this also avoids creating the mods server
    * channel store.
    *
-   * @default createSparkCommandTool(...)
+   * @default createSparkCommandTool(...) in connected mode; none in local mode
    */
   sparkCommandTools?: ToolSource
   /**
@@ -149,6 +150,7 @@ async function resolveWebSearchTools(webSearchTools?: ToolSource): Promise<Tool[
  * registrations win when names collide with built-in or custom tools.
  */
 export async function resolveLlmTools(options: ResolveLlmToolsOptions = {}): Promise<Tool[]> {
+  const localMode = isLocalMode()
   const activeTools = await resolveActiveTools(options.activeTools)
   const [
     builtInTools,
@@ -157,9 +159,9 @@ export async function resolveLlmTools(options: ResolveLlmToolsOptions = {}): Pro
     webSearchTools,
     customTools,
   ] = await Promise.all([
-    resolveToolSource(options.builtInTools ?? mcp),
-    resolveToolSource(options.debugTools ?? debug),
-    resolveSparkCommandTools(options.sparkCommandTools),
+    resolveToolSource(options.builtInTools ?? (localMode ? [] : mcp)),
+    resolveToolSource(options.debugTools ?? (localMode ? [] : debug)),
+    resolveSparkCommandTools(options.sparkCommandTools ?? (localMode ? [] : undefined)),
     resolveWebSearchTools(options.webSearchTools),
     resolveCustomTools(options.customTools),
   ])

@@ -19,9 +19,10 @@ The AIRI application framework, character renderers, and provider interfaces com
 | Voice interaction | Bundled offline VAD, automatic turn submission, speech playback, and tests of the complete local flow | [Voice conversation](docs/ai/local-voice-conversation.zh-CN.md) |
 | Avatar interaction | Emotion and motion controls, valid motion selection, Live2D expressions, and audio-driven mouth movement | [Expression evidence](docs/ai/validation/2026-10-17-voice-expression-link.zh-CN.md) |
 
-The tested local voice setup uses Smart Turn v3.2 and Qwen3-TTS-1.7B CustomVoice with Serena.
-ACT controls set each segment's emotion before synthesis. Automatic submission and actual playback passed the [integration check](docs/ai/validation/2026-10-17-modern-voice.zh-CN.md).
-Speech synthesis remains slower than playback. The guides record latency, endpoint errors, and interruption limits.
+The local voice preset uses a 60 MB bilingual streaming Zipformer recognizer, Smart Turn v3.2, and MOSS-TTS-Nano ONNX on the CPU.
+Qwen3.5-2B keeps its BF16 parameters on the GPU. The desktop started playing a known Chinese response in 314 ms after receiving its text.
+See the [measured latency and model tradeoffs](docs/ai/research/2026-10-17-fast-local-voice.zh-CN.md). This playback measurement excludes recognition and chat-model time.
+MOSS uses text and punctuation for prosody. ACT controls avatar expressions; this model does not accept emotion instructions.
 
 ## Data that you can inspect
 
@@ -55,6 +56,10 @@ Start the desktop application:
 pnpm dev:tamagotchi
 ```
 
+On the prepared Windows installation, double-click **`Start-Humanning.cmd`** to start the local model services and desktop together.
+It reuses healthy services and the existing desktop data directory. See the [local startup guide](docs/ai/local-voice-conversation.zh-CN.md) for preparation and settings.
+Local mode is the default: login, account sync, hosted providers, and product telemetry are disabled. Developers can explicitly set `VITE_AIRI_LOCAL_MODE=false` to enable connected features.
+
 Or start the browser application:
 
 ```sh
@@ -66,6 +71,7 @@ Existing character cards store provider choices. Change the active card as well 
 Machine-specific paths in the local service guides describe the tested installation.
 
 This fork has no separately verified binary release. Upstream AIRI installers do not include the changes described here.
+Inherited Cloudflare deployments require explicit activation and your own credentials. See [GitHub Actions configuration](docs/ai/local-deployment-and-github-actions.zh-CN.md).
 
 ## Evaluation and development
 
@@ -75,6 +81,7 @@ See the [protocol and reports](packages/memory-local/benchmarks/README.md) for b
 
 Recent integration records:
 
+- [Fast local voice, direct startup, and local mode](docs/ai/validation/2026-10-17-fast-local-companion.zh-CN.md)
 - [Audio, model replies, and persistence](docs/ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)
 - [Offline voice detection](docs/ai/validation/2026-10-17-offline-voice-detection.zh-CN.md)
 - [Voice turn completion](docs/ai/adr/2026-10-17-voice-turn-completion.zh-CN.md)

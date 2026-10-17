@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import onboardingLogo from '../../../../assets/onboarding.avif'
 
 import { AIRI_FLUX_URL, AIRI_TERMS_URL } from '../../../../constants/public-links'
+import { isLocalMode } from '../../../../libs/deployment'
 import { useAuthStore } from '../../../../stores/auth'
 import { useOnboardingStore } from '../../../../stores/onboarding'
 import { useSettingsGeneral } from '../../../../stores/settings'
@@ -22,6 +23,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const { t } = useI18n()
+const localMode = isLocalMode()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const settingsStore = useSettingsGeneral()
@@ -42,7 +44,7 @@ function handleLocalSetup() {
 </script>
 
 <template>
-  <div relative h-full flex flex-col>
+  <div :class="['relative h-full flex flex-col']">
     <div :class="['absolute', 'right-0', 'top-0', 'z-10']">
       <DropdownMenu
         align="end"
@@ -64,7 +66,7 @@ function handleLocalSetup() {
             :aria-label="t('settings.language.title')"
             type="button"
           >
-            <div class="i-lucide:globe" h-5 w-5 />
+            <div :class="['i-lucide:globe h-5 w-5']" />
           </button>
         </template>
 
@@ -92,7 +94,7 @@ function handleLocalSetup() {
         :duration="500"
         :class="['mb-1', 'flex', 'justify-center', 'md:mb-4', 'md:pt-8', 'lg:pt-16']"
       >
-        <img :src="onboardingLogo" max-h="50" aspect-square h-auto w-auto select-none object-cover>
+        <img :src="onboardingLogo" :class="['max-h-50 aspect-square h-auto w-auto select-none object-cover']">
       </div>
       <h2
         v-motion
@@ -116,6 +118,7 @@ function handleLocalSetup() {
     </div>
     <div :class="['mx-2 flex flex-col items-stretch gap-2']">
       <Button
+        v-if="!localMode"
         v-motion="{
           initial: { opacity: 0, y: 8 },
           enter: { opacity: 1, y: 0 },
@@ -129,7 +132,7 @@ function handleLocalSetup() {
         @click="handleLogin"
       />
       <Button
-        v-if="props.customProviderSetupEnabled"
+        v-if="localMode || props.customProviderSetupEnabled"
         v-motion="{
           initial: { opacity: 0 },
           enter: { opacity: 1 },
@@ -139,11 +142,12 @@ function handleLocalSetup() {
         variant="secondary"
         :outline="false"
         :class="['bg-transparent! text-neutral-600 dark:bg-neutral-700/60! dark:text-neutral-200']"
-        :label="t('settings.dialogs.onboarding.setupWithoutSigningIn')"
+        :label="t(localMode ? 'settings.dialogs.onboarding.configureLocal' : 'settings.dialogs.onboarding.setupWithoutSigningIn')"
         @click="handleLocalSetup"
       />
     </div>
     <nav
+      v-if="!localMode"
       v-motion="{
         initial: { opacity: 0 },
         enter: { opacity: 1 },

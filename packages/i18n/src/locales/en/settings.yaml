@@ -50,6 +50,7 @@ dialogs:
     loginPrompt: Sign in to use the official AIRI provider for the best experience.
     loginAction: Sign in
     setupWithoutSigningIn: Setup with your provider
+    configureLocal: Configure local models
     pricingLink: Pricing
     termsLink: Terms of Service
     flux: Flux
@@ -915,9 +916,11 @@ pages:
             title: End of speech
             description: After a pause, a model checks if you finished. A local audio model can listen to your words and intonation before transcription.
             enabled: Check if I finished speaking
-            enabled-description: Audio mode checks after 0.6 seconds and waits up to 6 seconds for unfinished speech. Turn this off to use the send delay.
+            enabled-description: Audio mode checks after 0.6 seconds. The maximum pause limits how long an unfinished turn waits. Turn this off to use the send delay.
             audio-endpoint: Local audio turn model
             audio-endpoint-description: Enter a local Smart Turn endpoint to judge audio. Leave empty to judge live transcripts with the rewrite model.
+            max-silence: Maximum thinking pause
+            max-silence-description: Two seconds gives faster replies but can split a long thinking pause. Set six seconds to leave more time to continue.
           rephrase:
             title: Transcript rewrite
             description: A chat model fixes recognition errors and removes filler words before a transcript becomes a draft. The original text is kept.

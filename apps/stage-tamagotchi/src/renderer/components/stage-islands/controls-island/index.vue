@@ -3,6 +3,7 @@ import { defineInvoke } from '@moeru/eventa'
 import { useElectronEventaContext, useElectronEventaInvoke, useElectronMouseInElement } from '@proj-airi/electron-vueuse'
 import { IS_DEV } from '@proj-airi/stage-shared'
 import { HearingConfigDialog } from '@proj-airi/stage-ui/components'
+import { isLocalMode } from '@proj-airi/stage-ui/libs/deployment'
 import { useSettings, useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { ScrollableArea, useTheme } from '@proj-airi/ui'
 import { refDebounced, useFocusWithin, useIntervalFn, useMouseInElement, useMousePressed } from '@vueuse/core'
@@ -50,6 +51,7 @@ const emit = defineEmits<Emits>()
 
 const { themeMode, switchToNextTheme } = useTheme()
 const { t } = useI18n()
+const localMode = isLocalMode()
 // The button shows the current theme, and its label tells what a press selects.
 const themeIcons = {
   light: 'i-solar:sun-2-outline',
@@ -360,6 +362,7 @@ function resetMainWindowPosition() {
                 ]"
               >
                 <ControlsIslandAuthButton
+                  v-if="!localMode"
                   :active="expanded"
                   :button-style="adjustStyleClasses.button"
                   :icon-class="adjustStyleClasses.icon"

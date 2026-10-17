@@ -11,6 +11,7 @@ import { errorMessageFrom } from '@moeru/std'
 import { isEnvTruthy } from '@proj-airi/stage-shared'
 import { trackButtonPlugin } from '@proj-airi/stage-ui/directives/track-button'
 import { browserAuthorizationHandler, registerAuthorizationHandler } from '@proj-airi/stage-ui/libs/auth'
+import { isHostedRoute, isLocalMode } from '@proj-airi/stage-ui/libs/deployment'
 import { setupSynced } from '@proj-airi/stage-ui/libs/pinia'
 import { configureAnalyticsAdapter } from '@proj-airi/stage-ui/libs/product-signals'
 import { MotionPlugin } from '@vueuse/motion'
@@ -75,6 +76,8 @@ else
   router = createRouter({ routes: routeRecords, history: createWebHistory() })
 
 router.beforeEach((to, from) => {
+  if (isLocalMode() && isHostedRoute(to.path))
+    return { path: to.path.startsWith('/settings') ? '/settings' : '/', replace: true }
   if (to.path !== from.path)
     NProgress.start()
 })

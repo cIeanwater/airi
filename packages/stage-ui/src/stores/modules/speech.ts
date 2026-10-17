@@ -21,6 +21,7 @@ import { x } from 'xastscript'
 import { injectKeyPiniaSynced } from '../../libs/pinia/synced-context'
 import { getDefinedProvider } from '../../libs/providers/providers'
 import { OFFICIAL_SPEECH_PROVIDER_ID, OFFICIAL_SPEECH_STREAMING_PROVIDER_ID, pickOfficialSpeechVoice } from '../../libs/providers/providers/official'
+import { streamLocalSpeech } from '../../libs/speech/local-stream'
 import { streamSpeech } from '../../libs/speech/streaming-pipeline'
 import { useProviderConfigStore } from '../providers/config'
 import { useProviderStore } from '../providers/provider'
@@ -576,6 +577,13 @@ export const useSpeechStore = defineStore('speech', () => {
     }
     if (!model || !voiceId)
       throw new Error('Speech requires a model and voice')
+    if (providerId === 'openai-compatible-audio-speech' && model === 'moss-tts-nano-100m') {
+      return { ...output, stream: async (text, signal) => streamLocalSpeech({
+        baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : '',
+        model,
+        voice: voiceId,
+      }, text, signal) }
+    }
     const provider = providersStore.getProviderInstance<SpeechProviderWithExtraOptions<string, Record<string, unknown>>>(providerId)
     const expressive = providerId === 'openai-compatible-audio-speech' && model === 'qwen3-tts-1.7b-customvoice'
     const segmenter: SpeechPipelineOptions<Blob>['segmenter'] = expressive

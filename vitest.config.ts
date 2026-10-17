@@ -4,6 +4,7 @@ import { providerInferenceProjects } from './packages/provider-inference/vitest.
 
 export default defineConfig({
   test: {
+    env: { VITE_AIRI_LOCAL_MODE: 'false' },
     projects: [
       'server/apps/auth',
       'server/apps/api',

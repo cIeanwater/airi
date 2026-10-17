@@ -1,9 +1,12 @@
 import { getActivePinia } from 'pinia'
 import { ref } from 'vue'
 
+import { isLocalMode } from '../libs/deployment'
 import { useAuthStore } from '../stores/auth'
 
 async function canUseRemote(allowRemote?: () => boolean | Promise<boolean>) {
+  if (isLocalMode())
+    return false
   if (allowRemote)
     return await allowRemote()
   if (!getActivePinia())

@@ -3,13 +3,16 @@ import type { Session, User } from 'better-auth'
 import type { AiriCard } from '../../types/airiCard'
 
 import { PiniaColada } from '@pinia/colada'
+import { useLive2dParams } from '@proj-airi/stage-ui-live2d/stores'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, toRaw } from 'vue'
 
+import { historicalBuiltInDescriptions } from '../../constants/prompts/built-in-descriptions'
 import { DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT } from '../../constants/prompts/character-defaults'
 import { OFFICIAL_SPEECH_PROVIDER_ID } from '../../libs/providers/providers/official'
 import { useAuthStore } from '../auth'
+import { useSettingsStageModel } from '../settings/stage-model'
 import { useAiriCardStore } from './airi-card'
 import { useArtistryStore } from './artistry'
 import { useConsciousnessStore } from './consciousness'
@@ -55,7 +58,55 @@ describe('card inheritance with real module stores', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ recommended: {}, voices: [], data: [] }))))
   })
 
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('projects a concise local prompt only for the unchanged built-in character without rewriting its card', async () => {
+    vi.stubEnv('VITE_AIRI_LOCAL_MODE', 'true')
+    const cards = useAiriCardStore()
+    await cards.initialize()
+    const original = structuredClone(toRaw(cards.cards.get('default'))!)
+    const stage = useSettingsStageModel()
+    stage.stageModelRenderer = 'live2d'
+    useLive2dParams().availableMotions = [{ motionName: 'Idle', motionIndex: 0, fileName: 'idle.motion3.json' }]
+
+    const prompt = cards.getSystemPrompt('default')
+
+    expect(cards.usesLocalConversationPrompt('default')).toBe(true)
+    expect(prompt).toContain('一到两句口语')
+    expect(prompt).toContain('<|ACT {"emotion":"happy"}|>')
+    expect(prompt).toContain('happy,sad,angry,think,surprised,awkward,question,curious,neutral')
+    expect(prompt).toContain('["Idle"]')
+    expect(prompt).toContain('记忆')
+    expect(prompt.length).toBeLessThan(700)
+    expect(cards.cards.get('default')).toEqual(original)
+    expect(prompt).not.toContain(DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT)
+
+    await cards.updateCard('default', { ...original, description: historicalBuiltInDescriptions[0] })
+    expect(cards.usesLocalConversationPrompt('default')).toBe(true)
+    expect(cards.getSystemPrompt('default')).toBe(prompt)
+    expect(cards.cards.get('default')?.description).toBe(historicalBuiltInDescriptions[0])
+
+    await cards.updateCard('default', { ...original, description: `${historicalBuiltInDescriptions[0]}\n用户增加的要求` })
+    expect(cards.usesLocalConversationPrompt('default')).toBe(false)
+    expect(cards.getSystemPrompt('default')).toContain('用户增加的要求')
+
+    await cards.updateCard('default', { ...original, systemPrompt: '用户自己的逐字系统要求。' })
+    expect(cards.usesLocalConversationPrompt('default')).toBe(false)
+    expect(cards.getSystemPrompt('default')).toContain('用户自己的逐字系统要求。')
+    expect(cards.getSystemPrompt('default')).toContain(DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT)
+
+    const imported = await cards.addCard(original, 'import')
+    expect(cards.usesLocalConversationPrompt(imported)).toBe(false)
+    expect(cards.getSystemPrompt(imported)).toContain(DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT)
+
+    vi.stubEnv('VITE_AIRI_LOCAL_MODE', 'false')
+    await cards.updateCard('default', original)
+    expect(cards.usesLocalConversationPrompt('default')).toBe(false)
+    expect(cards.getSystemPrompt('default')).toContain(DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT)
+  })
 
   // https://github.com/moeru-ai/airi/pull/2332
   // ROOT CAUSE:

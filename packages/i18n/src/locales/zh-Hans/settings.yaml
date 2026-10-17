@@ -42,6 +42,7 @@ dialogs:
     loginPrompt: 登录并使用 AIRI 官方提供的服务以获得最佳体验。
     loginAction: 登录
     setupWithoutSigningIn: 配置您自己的 AI 服务来源
+    configureLocal: 配置本地模型
     pricingLink: 价格
     termsLink: 服务条款
     flux: Flux 电量
@@ -869,9 +870,11 @@ pages:
             title: 说完判定
             description: 停顿后由模型判断你是否说完。本地音频模型直接听语音和语调，无需等待转写文本。
             enabled: 判断我是否说完了
-            enabled-description: 音频模式在停顿 0.6 秒后判断，未完句最多等待 6 秒。关闭后使用自动发送的延迟。
+            enabled-description: 音频模式在停顿 0.6 秒后判断，未完句等待时间由最长思考停顿限制。关闭后使用自动发送的延迟。
             audio-endpoint: 本地音频说完判定模型
             audio-endpoint-description: 填入本地 Smart Turn 地址后直接判断音频。留空则由改写模型判断实时转写文本。
+            max-silence: 最长思考停顿
+            max-silence-description: 2 秒回复更快，但较长思考可能被断句。需要更多续说时间时可设回 6 秒。
           rephrase:
             title: 转写改写
             description: 在转写成为草稿之前，由对话模型修正识别错误并去掉口头禅。原始文本会被保留。
