@@ -7,6 +7,8 @@ The original start-local-airi.ps1 entry remains available for its separate setup
 import argparse
 import json
 import os
+import re
+import shutil
 import socket
 import subprocess
 import time
@@ -17,6 +19,48 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_desktop_runtime(tools, desktop_root, explicit_node=None):
+    """Resolve prepared Node first. Explorer does not inherit a coding terminal's PATH."""
+    cli = desktop_root / "node_modules/electron-vite/bin/electron-vite.js"
+    if not cli.is_file():
+        raise RuntimeError(f"Desktop dependencies are missing: {cli}. Run pnpm install in this checkout.")
+    if explicit_node is not None:
+        node = explicit_node.expanduser().resolve()
+    else:
+        prepared = tools / "node-v26.7.0-win-x64/node.exe"
+        installed = shutil.which("node")
+        node = prepared.resolve() if prepared.is_file() else Path(installed).resolve() if installed else None
+    if node is None or not node.is_file():
+        raise RuntimeError("Node.js runtime was not found. Prepare .tools/node-v26.7.0-win-x64 in the parent folder, or use --node-path PATH_TO_NODE_EXE.")
+    try:
+        result = subprocess.run([str(node), "--version"], capture_output=True, text=True, timeout=10,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"Cannot run the Node.js runtime: {node}.") from error
+    version = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", result.stdout.strip())
+    supported = False
+    if version:
+        major, minor, _patch = map(int, version.groups())
+        supported = major > 22 or (major == 22 and minor >= 12) or (major == 20 and minor >= 19)
+    if result.returncode != 0 or not supported:
+        raise RuntimeError(f"Unsupported Node.js runtime: {node}. Use Node 20.x from 20.19, or Node 22.12 and later.")
+    return node, cli
+
+
+def create_desktop_environment(environment, node, tools):
+    """Keep runtime paths inside the child process. Do not change the user's system PATH."""
+    result = dict(environment)
+    path_keys = [key for key in result if key.upper() == "PATH"]
+    previous_path = next((result[key] for key in path_keys), "")
+    for key in path_keys:
+        del result[key]
+    result.update({"PATH": str(node.parent) + (os.pathsep + previous_path if previous_path else ""),
+                   "APP_USER_DATA_PATH": str(tools / "airi-stage1-desktop-profile"),
+                   "APP_REMOTE_DEBUG": "true", "APP_REMOTE_DEBUG_PORT": "9250", "APP_REMOTE_DEBUG_NO_OPEN": "true",
+                   "VITE_AIRI_LOCAL_MODE": "true", "AIRI_VUE_DEVTOOLS": "false"})
+    return result
 
 
 def get_health(port, path="/health", token=None):
@@ -62,8 +106,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools-dir", type=Path, default=ROOT.parent / ".tools")
     parser.add_argument("--models-dir", type=Path, default=ROOT / "local-models")
+    parser.add_argument("--node-path", type=Path, default=os.environ.get("HUMANNING_NODE") or None,
+                        help="Use an explicit Node.js executable for the desktop")
     parser.add_argument("--services-only", action="store_true")
-    parser.add_argument("--check", action="store_true", help="Check prepared file paths without starting a process")
+    parser.add_argument("--check", action="store_true", help="Check prepared paths and the Node.js version without starting services")
     parser.add_argument("--no-message-recording", action="store_true", help="Keep chat history but disable full model request JSON records")
     args = parser.parse_args()
     if os.name != "nt":
@@ -78,7 +124,9 @@ def main():
     asr_python = asr_root / "venv/Scripts/python.exe"
     turn_python = turn_root / "venv/Scripts/python.exe"
     desktop_root = ROOT / "apps/stage-tamagotchi"
-    desktop_command = desktop_root / "node_modules/.bin/electron-vite.cmd"
+    desktop_node = desktop_cli = None
+    if not args.services_only:
+        desktop_node, desktop_cli = resolve_desktop_runtime(tools, desktop_root, args.node_path)
     required = [
         llm_python, tts_python, asr_python, turn_python,
         ROOT / "scripts/serve-qwen35-2b-bf16.py",
@@ -97,25 +145,26 @@ def main():
         "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx",
         "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt"))
     if not args.services_only:
-        required.append(desktop_command)
+        required.extend([desktop_node, desktop_cli])
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         print(json.dumps({"ready": False, "missing_files": missing}, ensure_ascii=False, indent=2))
         return 1
     if args.check:
         print(json.dumps({"prepared_paths": True, "files_checked": len(required),
-                          "note": "This checks file presence. Each model service checks its weights at startup."}))
+                          "desktop_node": str(desktop_node) if desktop_node else None,
+                          "note": "This checks file presence and the desktop Node version. Each model service checks its weights at startup."}))
         return 0
 
     logs = tools / "local-voice-logs"
     logs.mkdir(parents=True, exist_ok=True)
     with startup_lock(logs):
         return start_services(args, tools, models, logs, llm_python, asr_python, turn_python, tts_python,
-                              asr_root, turn_root, tts_root, desktop_root, desktop_command)
+                              asr_root, turn_root, tts_root, desktop_root, desktop_node, desktop_cli)
 
 
 def start_services(args, tools, models, logs, llm_python, asr_python, turn_python, tts_python,
-                   asr_root, turn_root, tts_root, desktop_root, desktop_command):
+                   asr_root, turn_root, tts_root, desktop_root, desktop_node, desktop_cli):
     environment = {**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
                    "HF_HUB_DISABLE_TELEMETRY": "1", "PYTHONDONTWRITEBYTECODE": "1"}
     llm_arguments = [str(llm_python), "-u", str(ROOT / "scripts/serve-qwen35-2b-bf16.py"),
@@ -132,10 +181,8 @@ def start_services(args, tools, models, logs, llm_python, asr_python, turn_pytho
                         str(tts_root), "--port", "18084", "--threads", "2"], ROOT, environment, "moss-tts-nano-100m"),
     ]
     if not args.services_only:
-        desktop_environment = {**environment, "APP_USER_DATA_PATH": str(tools / "airi-stage1-desktop-profile"),
-                               "APP_REMOTE_DEBUG": "true", "APP_REMOTE_DEBUG_PORT": "9250", "APP_REMOTE_DEBUG_NO_OPEN": "true",
-                               "VITE_AIRI_LOCAL_MODE": "true", "AIRI_VUE_DEVTOOLS": "false"}
-        services.append(("desktop", 9250, [str(desktop_command), "dev"], desktop_root, desktop_environment, None))
+        desktop_environment = create_desktop_environment(environment, desktop_node, tools)
+        services.append(("desktop", 9250, [str(desktop_node), str(desktop_cli), "dev"], desktop_root, desktop_environment, None))
 
     started = []
     try:

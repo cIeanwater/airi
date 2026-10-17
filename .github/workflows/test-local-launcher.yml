@@ -1,0 +1,39 @@
+name: Test Local Windows Launcher
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Start-Humanning.cmd
+      - scripts/start-local-voice.py
+      - scripts/test-local-voice-launcher.py
+      - .github/workflows/test-local-launcher.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - Start-Humanning.cmd
+      - scripts/start-local-voice.py
+      - scripts/test-local-voice-launcher.py
+      - .github/workflows/test-local-launcher.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launcher:
+    name: Windows launcher without terminal PATH
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26.7.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Run launcher regressions
+        run: python -B scripts/test-local-voice-launcher.py -v
