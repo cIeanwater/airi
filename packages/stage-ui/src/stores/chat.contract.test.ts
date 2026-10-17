@@ -4,6 +4,7 @@ import type { Tool } from '@xsai/shared-chat'
 import type { SyncedPiniaRuntime } from 'pinia-plugin-synced'
 
 import type { LlmStreamOptions } from './ai/chat-llm/llm'
+import type { useAiriCardStore } from './modules/airi-card'
 import type { useMemoryStore } from './modules/memory'
 
 import { errorMessageFrom } from '@moeru/std'
@@ -84,6 +85,7 @@ const initializeSessionMock = vi.fn()
 const disposeSessionMock = vi.fn()
 const ensureCurrentSessionMock = vi.fn()
 const getChatProviderInstanceMock = vi.fn()
+const usesLocalConversationPromptMock = vi.fn<ReturnType<typeof useAiriCardStore>['usesLocalConversationPrompt']>()
 const getToolsByNamesMock = vi.fn<(names: string[]) => Tool[]>()
 const visionMocks = vi.hoisted(() => ({ configured: false, model: 'system', runInference: vi.fn(), useForToolImages: true }))
 /** A catalog model can omit its abilities, as most provider catalogs do. */
@@ -286,6 +288,7 @@ vi.mock('./modules/airi-card', () => ({
       return activeCardIdRef.value
     },
     getCard: () => undefined,
+    usesLocalConversationPrompt: (characterId: string) => usesLocalConversationPromptMock(characterId),
     getModules: (id: string) => ({
       consciousness: cardSelections.get(id) ?? { provider: activeProviderRef.value, model: activeModelRef.value },
       vision: { provider: visionMocks.configured ? 'vision-provider' : '', model: visionMocks.configured ? 'vision-model' : '' },
@@ -368,6 +371,7 @@ describe('chat store contract', () => {
     disposeSessionMock.mockReset()
     ensureCurrentSessionMock.mockReset().mockResolvedValue('session-1')
     getChatProviderInstanceMock.mockReset().mockResolvedValue(provider)
+    usesLocalConversationPromptMock.mockReset().mockReturnValue(false)
     getToolsByNamesMock.mockReset().mockImplementation(names => names.map(name => ({
       type: 'function',
       function: {
@@ -1783,6 +1787,24 @@ describe('chat store contract', () => {
 
     expect(aliceTurn?.end).toHaveBeenCalledOnce()
     expect(ioTracerMocks.activeTurnSpan.value).toBeUndefined()
+  })
+
+  it('selects compact runtime guidance for the target session character', async () => {
+    usesLocalConversationPromptMock.mockImplementation(characterId => characterId === 'alice')
+    llmStreamMock.mockImplementation(async (_model: string, _provider: GenerationProvider, _context: Conversation, options: StreamOptions) => {
+      await options.onStreamEvent?.({ type: 'finish' })
+    })
+    const store = useChatStore()
+
+    await store.send({ sessionId: 'session-1', text: 'For Alice' })
+    await store.send({ sessionId: 'session-2', text: 'For Bob' })
+
+    expect(activeCardIdRef.value).toBe('alice')
+    expect(usesLocalConversationPromptMock).toHaveBeenNthCalledWith(1, 'alice')
+    expect(usesLocalConversationPromptMock).toHaveBeenNthCalledWith(2, 'bob')
+    expect(createRuntimePromptContextMock).toHaveBeenNthCalledWith(1, '遵循角色提示中的 ACT 格式，开头只使用一次情绪标记。')
+    expect(createRuntimePromptContextMock).toHaveBeenNthCalledWith(2, expect.stringContaining('base.prompt.emotion'))
+    expect(createRuntimePromptContextMock).toHaveBeenNthCalledWith(2, expect.stringContaining('base.prompt.emoji'))
   })
 
   it('ingests the runtime prompt before composing prompt snapshots', async () => {
