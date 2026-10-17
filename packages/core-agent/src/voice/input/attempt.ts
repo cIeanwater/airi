@@ -45,6 +45,7 @@ export class SpeechInputAttempt {
   private audio: AudioInput | undefined
   private activityEnd = 0
   private speechRevision = 0
+  private speechFrames = 0
   private from: Position | undefined
   private sealedFrame: number | undefined
   private detector: (Observer & { start: () => void }) | undefined
@@ -108,9 +109,11 @@ export class SpeechInputAttempt {
       return false
     }
 
-    this.activityEnd = range.endFrame
-    if (evidence.speech)
+    if (evidence.speech) {
+      this.speechFrames += range.endFrame - Math.max(this.activityEnd, range.startFrame)
       this.speechRevision += 1
+    }
+    this.activityEnd = range.endFrame
 
     this.endProposal?.()
     return true
@@ -153,7 +156,7 @@ export class SpeechInputAttempt {
           const transcript = this.accepted!.transcript.raw
           const speechRevision = this.speechRevision
           const context = this.owner.options.conversationContext?.(this.sessionId) ?? { revision: 0, messages: [] }
-          const result = await detector({ audio: window, transcript, speechRevision, context }, signal)
+          const result = await detector({ audio: window, transcript, speechRevision, speechFrames: this.speechFrames, context }, signal)
           return { result, transcript, speechRevision, context }
         }, (observation) => {
           if (closed || observation.value.result !== 'end')

@@ -12,11 +12,17 @@ export interface VoiceEndJudgeOptions {
    */
   judge: (transcript: string, context: TurnEvidence['context'], signal: AbortSignal) => Promise<EndJudgement>
   /**
-   * Silence after the last speech that starts a judgement. Shorter pauses are breaths between words.
+   * Silence after the last speech that starts a judgement. A function reads the current setting on each window.
    *
    * @default 1200
    */
-  pauseMs?: number
+  pauseMs?: number | (() => number)
+}
+
+interface PendingJudgement {
+  key: string
+  abort: AbortController
+  result?: EndJudgement
 }
 
 /** The evidence state that one judgement answers. A change of any part makes the judgement stale. */
@@ -44,8 +50,6 @@ function evidenceKey(evidence: TurnEvidence) {
  * - A voice plugin named `voice-end-judge`.
  */
 export function createVoiceEndJudgePlugin(options: VoiceEndJudgeOptions): VoicePlugin {
-  const pauseMs = options.pauseMs ?? 1200
-
   return {
     name: 'voice-end-judge',
     setup(scope) {
@@ -61,7 +65,7 @@ export function createVoiceEndJudgePlugin(options: VoiceEndJudgeOptions): VoiceP
 
           let speechRevision = 0
           let pauseStart = 0
-          let current: { key: string, abort: AbortController, result?: EndJudgement } | undefined
+          let current: PendingJudgement | undefined
 
           const installed = control.detectEnd({ windowMs: 100, hopMs: 100, activity: 'ordered' }, async (evidence, signal) => {
             const { range, sampleRate } = evidence.audio
@@ -70,16 +74,21 @@ export function createVoiceEndJudgePlugin(options: VoiceEndJudgeOptions): VoiceP
               pauseStart = range.endFrame
             }
 
+            const key = evidenceKey(evidence)
+            if (current && current.key !== key) {
+              current.abort.abort('Speech evidence changed')
+              current = undefined
+            }
+
             // Before the first speech, silence is the wait after a wake word, not the end of a message.
             const pausedMs = (range.endFrame - pauseStart) * 1000 / sampleRate
+            const pauseMs = typeof options.pauseMs === 'function' ? options.pauseMs() : options.pauseMs ?? 1200
             const text = evidence.transcript.text.trim()
             if (speechRevision === 0 || pausedMs < pauseMs || !text)
               return 'continue'
 
-            const key = evidenceKey(evidence)
-            if (current?.key !== key) {
-              current?.abort.abort('Speech evidence changed')
-              const judgement: NonNullable<typeof current> = { key, abort: new AbortController() }
+            if (!current) {
+              const judgement: PendingJudgement = { key, abort: new AbortController() }
               current = judgement
               void options.judge(text, evidence.context, AbortSignal.any([judgement.abort.signal, signal]))
                 .catch((): EndJudgement => 'incomplete')

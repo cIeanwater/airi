@@ -1,4 +1,5 @@
 import type { SpeechOutput, TurnRef } from '@proj-airi/core-agent'
+import type { SpeechPipelineOptions } from '@proj-airi/pipelines-audio'
 import type { SpeechProviderWithExtraOptions } from '@xsai-ext/providers/utils'
 import type {} from 'pinia-plugin-synced'
 
@@ -6,6 +7,7 @@ import type { AiriExtension } from '../../types/airiCard'
 import type { VoiceCatalogConfiguration, VoiceCatalogIdentity, VoiceInfo } from '../providers/provider'
 
 import { errorMessageFrom } from '@moeru/std'
+import { createTtsSegmentStream } from '@proj-airi/pipelines-audio'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { refManualReset } from '@vueuse/core'
 import { generateSpeech } from '@xsai/generate-speech'
@@ -575,14 +577,37 @@ export const useSpeechStore = defineStore('speech', () => {
     if (!model || !voiceId)
       throw new Error('Speech requires a model and voice')
     const provider = providersStore.getProviderInstance<SpeechProviderWithExtraOptions<string, Record<string, unknown>>>(providerId)
-    return { ...output, synthesize: async (request, signal) => {
+    const expressive = providerId === 'openai-compatible-audio-speech' && model === 'qwen3-tts-1.7b-customvoice'
+    const segmenter: SpeechPipelineOptions<Blob>['segmenter'] = expressive
+      ? (tokens, meta) => createTtsSegmentStream(tokens, meta, { boost: 0, maximumWords: 40 })
+      : undefined
+    return { ...output, ttsMaxConcurrent: expressive ? 1 : undefined, segmenter, synthesize: async (request, signal) => {
       signal.throwIfAborted()
       const client = await provider
       signal.throwIfAborted()
       const input = voice && useSSML && canUseSSML ? generateSSML(request.text, voice, { ...config, pitch: pitchValue }) : request.text
-      const settings = providerId === OFFICIAL_SPEECH_PROVIDER_ID
+      let settings = providerId === OFFICIAL_SPEECH_PROVIDER_ID
         ? { ...config, extraBody: { ...(config.extraBody as Record<string, unknown> | undefined), airi_analytics: { trigger: 'auto', source: 'chat_auto_tts', voice_type: voiceType, turn_id: turn.turnId } } }
         : config
+      if (expressive) {
+        const styles = {
+          happy: '开心、轻快，带自然笑意',
+          sad: '轻柔、低落，语速稍慢',
+          angry: '认真、略带不满，重音明确，不大喊',
+          think: '若有所思，停顿自然',
+          surprised: '惊喜，有自然的语调起伏',
+          awkward: '略害羞，带一点不好意思的笑意',
+          question: '疑惑，问句自然上扬',
+          curious: '好奇、有兴趣，轻快地发问',
+          neutral: '自然、平和、亲切',
+        }
+        const emotion = request.emotion
+        const direction = emotion ? `当前语气：${styles[emotion.name]}。情绪强度${Math.round(emotion.intensity * 100)}%。` : '根据文字含义自然表达语气。'
+        const custom = typeof config.instructions === 'string' ? config.instructions : ''
+        // The pipeline snapshots ACT before synthesis. Playback's onSpecial runs
+        // later and cannot supply the emotion for audio already being generated.
+        settings = { ...config, responseFormat: 'wav', emotion: emotion?.name ?? 'neutral', instructions: `用清亮、温柔的年轻成年女大学生声线自然聊天，保持停连、重音和问句起伏。${direction}${custom}` }
+      }
       const audio = await generateSpeech({ ...client.speech(model, settings), input, voice: voiceId, abortSignal: signal })
       return new Blob([audio])
     } }

@@ -1,14 +1,70 @@
-import type { TtsRequest } from '@proj-airi/pipelines-audio'
+import type { SpeechPipelineOptions, TtsRequest } from '@proj-airi/pipelines-audio'
 
 import type { SpeechAudio, StreamingTranscriber, TranscriptionEvent } from '../../index'
 
-import { AudioInput, createPushStream, Playback } from '@proj-airi/pipelines-audio'
+import { AudioInput, createPushStream, createTtsSegmentStream, Playback } from '@proj-airi/pipelines-audio'
 import { describe, expect, it, vi } from 'vitest'
 
 import { VoiceController } from '../../index'
 import { keepOpen, pcmSource } from '../../testing/audio'
 
 describe('voiceController output', () => {
+  // ROOT CAUSE:
+  // SpeechOutput exposed only synthesis, so providers could not replace the
+  // pipeline's short opening chunks or its four concurrent requests. The
+  // response now forwards provider segmentation and concurrency directly.
+  it('uses the output segmenter to retain one complete sentence for synthesis', async () => {
+    const requested: string[] = []
+    const sentence = 'Today I went to the library, and found a story I wanted to share, because it reminded me of our last conversation.'
+    const segmenter: SpeechPipelineOptions<Blob>['segmenter'] = (tokens, meta) => createTtsSegmentStream(tokens, meta, { boost: 0, maximumWords: 40 })
+    const playback = new Playback({ nowMs: () => 0, play: () => ({ done: Promise.resolve({ throughMs: 1 }), stop: async () => ({ throughMs: 0 }) }) })
+    const controller = new VoiceController({ speech: () => ({ playback, segmenter, synthesize: async (request) => {
+      requested.push(request.text)
+      return new Blob([request.text])
+    } }) })
+    try {
+      const response = controller.openResponse({ sessionId: 'alice', turnId: 'complete-sentence' })
+      const speech = response.openSpeech({ purpose: 'answer' })
+      speech.write(sentence)
+      speech.end()
+
+      expect(await response.finish()).toBe('finished')
+      expect(requested).toEqual([sentence])
+    }
+    finally {
+      await controller.close()
+    }
+  })
+
+  it.each([
+    { limit: 1, initialRequests: ['First.'] },
+    { limit: undefined, initialRequests: ['First.', 'Second.', 'Third.'] },
+  ])('respects synthesis concurrency $limit and preserves the default without a limit', async ({ limit, initialRequests }) => {
+    const firstAudio = Promise.withResolvers<Blob>()
+    const requested: string[] = []
+    const playback = new Playback({ nowMs: () => 0, play: () => ({ done: Promise.resolve({ throughMs: 1 }), stop: async () => ({ throughMs: 0 }) }) })
+    const controller = new VoiceController({ speech: () => ({ playback, ttsMaxConcurrent: limit, synthesize: async (request) => {
+      requested.push(request.text)
+      return request.text === 'First.' ? firstAudio.promise : new Blob([request.text])
+    } }) })
+    const response = controller.openResponse({ sessionId: 'alice', turnId: 'provider-concurrency' })
+    try {
+      const speech = response.openSpeech({ purpose: 'answer' })
+      speech.write('First. Second. Third.')
+      speech.end()
+
+      await expect.poll(() => requested.length).toBe(initialRequests.length)
+      expect(requested).toEqual(initialRequests)
+    }
+    finally {
+      firstAudio.resolve(new Blob(['First.']))
+      await response.finish()
+      await controller.close()
+    }
+
+    expect(requested).toEqual(['First.', 'Second.', 'Third.'])
+  })
+
   it('ends the speaking indicator only after cancelled audio becomes silent', async () => {
     const silence = Promise.withResolvers<{ throughMs: number }>()
     const started = vi.fn()

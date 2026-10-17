@@ -15,6 +15,7 @@ import VueRouter from 'vue-router/vite'
 
 import { paraformerBilingualZhEn, xAsrBilingualZhEnInt8, zipformerMultilingual } from '@proj-airi/provider-inference/sherpaw-transcription/models'
 import { kwsModel } from '@proj-airi/stage-ui/libs/voice/kws-model-info'
+import { transformersAssets } from '@proj-airi/stage-ui/vite/transformers-assets'
 import { Download } from '@proj-airi/unplugin-fetch'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
 import { resolveModelEndpoint, Sherpaw } from '@proj-airi/vite-plugin-sherpaw'
@@ -273,6 +274,7 @@ export default defineConfig({
         fullInstall: true,
       }),
 
+      transformersAssets(),
       // Main downloads remote transcription models. Every build bundles the small wake word model,
       // and development serves it from the cache, because main's model asset service does not serve it.
       Sherpaw({

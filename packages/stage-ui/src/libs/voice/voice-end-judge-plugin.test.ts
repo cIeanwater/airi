@@ -1,7 +1,7 @@
 import type { TranscriptionEvent } from '@proj-airi/core-agent'
 import type { PcmBlock } from '@proj-airi/pipelines-audio'
 
-import type { EndJudgement } from './voice-end-judge-plugin'
+import type { EndJudgement, VoiceEndJudgeOptions } from './voice-end-judge-plugin'
 
 import { VoiceController } from '@proj-airi/core-agent'
 import { AudioInput, createPushStream } from '@proj-airi/pipelines-audio'
@@ -12,13 +12,13 @@ import { createVoiceEndJudgePlugin } from './voice-end-judge-plugin'
 /** 1 kHz keeps frame numbers equal to milliseconds. */
 const SAMPLE_RATE = 1000
 
-function createHarness(judge: (transcript: string, context: unknown, signal: AbortSignal) => Promise<EndJudgement>, enabled = true) {
+function createHarness(judge: (transcript: string, context: unknown, signal: AbortSignal) => Promise<EndJudgement>, enabled = true, pauseMs: VoiceEndJudgeOptions['pauseMs'] = 1200) {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream })
   const output = createPushStream<TranscriptionEvent>()
   const submit = vi.fn(async () => ({ status: 'drafted' as const, draftId: 'draft' }))
   const controller = new VoiceController({ audio, submit, transcriber: () => ({ transcribe: () => output.stream }) })
-  controller.use(createVoiceEndJudgePlugin({ enabled: () => enabled, judge, pauseMs: 1200 }), { grants: ['input-control'] })
+  controller.use(createVoiceEndJudgePlugin({ enabled: () => enabled, judge, pauseMs }), { grants: ['input-control'] })
   const attempt = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
   let frame = 0
   let revision = 0
@@ -115,6 +115,50 @@ describe('createVoiceEndJudgePlugin', () => {
     await expect.poll(() => harness.attempt.state.phase).not.toBe('capturing')
     expect(signals[0]!.aborted).toBe(true)
     expect(judge).toHaveBeenLastCalledWith('remind me to buy milk', expect.anything(), expect.any(AbortSignal))
+    await harness.controller.close()
+  })
+
+  it('aborts a pending judgement as soon as speech resumes', async () => {
+    // A stale judgement kept the model busy until another full pause. New speech now cancels it on the next window.
+    const pending = Promise.withResolvers<EndJudgement>()
+    let judgementSignal: AbortSignal | undefined
+    const judge = vi.fn(async (_transcript: string, _context: unknown, signal: AbortSignal) => {
+      judgementSignal = signal
+      return pending.promise
+    })
+    const harness = createHarness(judge)
+    await harness.start()
+
+    await harness.speak('remind me to')
+    await harness.pause(1300)
+    await vi.waitFor(() => expect(judge).toHaveBeenCalledOnce())
+    await harness.speak('remind me to buy milk')
+    await harness.pause(100)
+
+    await expect.poll(() => judgementSignal?.aborted).toBe(true)
+    expect(harness.attempt.state.phase).toBe('capturing')
+    pending.resolve('complete')
+    await harness.pause(300)
+    expect(harness.attempt.state.phase).toBe('capturing')
+    await harness.controller.close()
+  })
+
+  it('reads the configured pause on each window', async () => {
+    const judge = vi.fn(async () => 'complete' as const)
+    let pauseMs = 2000
+    const harness = createHarness(judge, true, () => pauseMs)
+    await harness.start()
+
+    await harness.speak('what time is it')
+    await harness.pause(1600)
+
+    expect(judge).not.toHaveBeenCalled()
+    expect(harness.attempt.state.phase).toBe('capturing')
+    pauseMs = 1000
+    await harness.pause(300)
+
+    await expect.poll(() => harness.attempt.state.phase).not.toBe('capturing')
+    expect(judge).toHaveBeenCalledOnce()
     await harness.controller.close()
   })
 

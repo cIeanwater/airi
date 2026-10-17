@@ -1,3 +1,4 @@
+import type { AudioPlayback, TtsRequest } from '@proj-airi/pipelines-audio'
 import type { LeadershipMode, SyncedPiniaRuntime } from 'pinia-plugin-synced'
 import type { App } from 'vue'
 
@@ -65,6 +66,54 @@ async function createSyncedPair() {
 }
 
 describe('speech synchronization', () => {
+  it('passes each Qwen speech segment its own emotion instruction without changing other models', async () => {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input).endsWith('/audio/speech')) {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'audio/wav' } })
+      }
+      return Response.json({ data: [], voices: [] })
+    }))
+    const context = createSyncedContext(`speech:${crypto.randomUUID()}`, 'leader-only')
+    await vi.waitFor(() => expect(context.runtime.isLeader()).toBe(true))
+    const provider = 'openai-compatible-audio-speech'
+    await useProviderConfigStore(context.pinia).ensureProvider(provider, provider, { apiKey: 'local', baseUrl: 'http://127.0.0.1:18084/v1/' })
+    const audioContext = new AudioContext()
+    const playback: AudioPlayback = { nowMs: () => 0, openGroup: vi.fn<AudioPlayback['openGroup']>() }
+    const request: TtsRequest = { turnId: 'reply', streamId: 'stream', intentId: 'intent', segmentId: 'part', sequence: 0, text: '真的吗？', special: null, reason: 'hard', priority: 0, createdAt: 0 }
+    try {
+      const output = context.speechStore.createOutput({ sessionId: 'session', turnId: 'reply' }, { provider, model: 'qwen3-tts-1.7b-customvoice', voice_id: 'serena' }, { playback }, audioContext)
+      if (!('synthesize' in output))
+        throw new Error('Expected request-based speech output')
+      expect(output.ttsMaxConcurrent).toBe(1)
+      expect(output.segmenter).toBeTypeOf('function')
+      await output.synthesize({ ...request, emotion: { name: 'curious', intensity: 0.7 } }, new AbortController().signal)
+      await output.synthesize({ ...request, emotion: { name: 'neutral', intensity: 0 } }, new AbortController().signal)
+      await output.synthesize(request, new AbortController().signal)
+      expect(bodies[0]?.instructions).toContain('好奇')
+      expect(bodies[0]?.instructions).toContain('70%')
+      expect(bodies[0]?.emotion).toBe('curious')
+      expect(bodies[0]?.instructions).toContain('成年女大学生')
+      expect(bodies[0]?.response_format).toBe('wav')
+      expect(bodies[1]?.instructions).toContain('平和')
+      expect(bodies[1]?.emotion).toBe('neutral')
+      expect(bodies[1]?.instructions).not.toContain('好奇')
+      expect(bodies[2]?.instructions).not.toContain('好奇')
+      const other = context.speechStore.createOutput({ sessionId: 'session', turnId: 'other' }, { provider, model: 'tts-1', voice_id: 'serena' }, { playback }, audioContext)
+      if (!('synthesize' in other))
+        throw new Error('Expected request-based speech output')
+      expect(other.ttsMaxConcurrent).toBeUndefined()
+      expect(other.segmenter).toBeUndefined()
+      await other.synthesize({ ...request, emotion: { name: 'happy', intensity: 1 } }, new AbortController().signal)
+      expect(bodies[3]).not.toHaveProperty('instructions')
+      expect(bodies[3]).not.toHaveProperty('emotion')
+    }
+    finally {
+      await audioContext.close()
+    }
+  })
+
   // https://github.com/moeru-ai/airi/pull/2490#discussion_r3967949219
   // ROOT CAUSE: Catalog invalidation erased the voice just applied by a card.
   // The selection command must discard the old catalog before setting the override.

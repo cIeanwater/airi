@@ -337,6 +337,8 @@ export const useHearingStore = defineStore('hearing-store', () => {
   const rephraseEnabled = useLocalStorageManualReset<boolean>('settings/hearing/rephrase-enabled', true, persistenceOptions)
   // A chat model reads paused transcripts and ends finished messages before the silence limit.
   const endJudgeEnabled = useLocalStorageManualReset<boolean>('settings/hearing/end-judge-enabled', true, persistenceOptions)
+  // A selected local endpoint judges raw audio. An empty endpoint selects transcript judgement.
+  const endJudgeAudioEndpoint = useLocalStorageManualReset('settings/hearing/end-judge-audio-endpoint', '', persistenceOptions)
   // An empty provider uses the chat model of the consciousness module.
   const rephraseProvider = useLocalStorageManualReset('settings/hearing/rephrase-provider', '', persistenceOptions)
   const rephraseModel = useLocalStorageManualReset('settings/hearing/rephrase-model', '', persistenceOptions)
@@ -414,6 +416,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     confidenceThreshold.reset()
     rephraseEnabled.reset()
     endJudgeEnabled.reset()
+    endJudgeAudioEndpoint.reset()
     rephraseProvider.reset()
     rephraseModel.reset()
   }
@@ -635,6 +638,7 @@ export const useHearingStore = defineStore('hearing-store', () => {
     confidenceThreshold,
     rephraseEnabled,
     endJudgeEnabled,
+    endJudgeAudioEndpoint,
     rephraseProvider,
     rephraseModel,
     verboseJsonNotSupported,

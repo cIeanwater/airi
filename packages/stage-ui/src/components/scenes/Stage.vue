@@ -261,7 +261,7 @@ const chatSession = useChatSessionStore()
 const backgroundStore = useBackgroundStore()
 const { activeBackgroundUrl } = storeToRefs(backgroundStore)
 
-const { currentMotion } = storeToRefs(useLive2dParams())
+const { currentMotion, availableMotions } = storeToRefs(useLive2dParams())
 
 const emotionsQueue = createQueue<EmotionPayload>({
   handlers: [
@@ -320,12 +320,13 @@ function toStageEmotionPayload(payload: { name: string, intensity: number }): Em
 chatHookCleanups.push(streamingControl.onSignal(async (signal) => {
   if (signal.type === 'act') {
     const act = normalizeActPayload(signal.payload)
-    if (act.motion && stageModelRenderer.value === 'live2d') {
+    const motion = availableMotions.value.find(motion => motion.motionName === act.motion)
+    if (motion && stageModelRenderer.value === 'live2d') {
       // An explicit motion owns the body. Keep the emotion overlay without
       // selecting another motion, so both fields of the ACT payload take effect.
       if (act.emotion)
         await live2dSceneRef.value?.setEmotion(act.emotion.name, act.emotion.intensity, false)
-      currentMotion.value = { group: act.motion }
+      currentMotion.value = { group: motion.motionName, index: motion.motionIndex }
       return
     }
     if (act.emotion) {

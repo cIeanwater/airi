@@ -1,10 +1,11 @@
 """Serve the local Qwen3.5-2B BF16 checkpoint for AIRI text chat.
 
 The service uses existing PyTorch and Transformers packages. It binds to loopback,
-checks publisher hashes, and never downloads weights or records chat messages.
+checks publisher hashes, and records complete messages only with an explicit flag.
 """
 
 import argparse
+import gc
 import hashlib
 import json
 import math
@@ -17,6 +18,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,6 +27,71 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_ID = "qwen3.5-2b-bf16"
 MAX_BODY_BYTES = 1024 * 1024
+
+
+def reject_nonfinite_json(value: str) -> None:
+    raise ValueError(f"JSON numbers must be finite, received {value}")
+
+
+class MessageRecorder:
+    """Keep optional request records on disk, without HTTP headers."""
+
+    def __init__(self, directory: Path | None, max_age_days: int, max_records: int):
+        if max_age_days < 1 or max_records < 1:
+            raise ValueError("Message retention limits must be positive integers")
+        self.directory = directory.resolve() if directory is not None else None
+        self.max_age_days = max_age_days
+        self.max_records = max_records
+        self.last_error = None
+        self.lock = threading.Lock()
+        if self.directory is not None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self.prune()
+
+    def describe(self) -> dict:
+        return {
+            "enabled": self.directory is not None,
+            "directory": str(self.directory) if self.directory is not None else None,
+            "max_age_days": self.max_age_days,
+            "max_records": self.max_records,
+            "last_error": self.last_error,
+        }
+
+    def prune(self) -> None:
+        if self.directory is None:
+            return
+        cutoff = time.time() - self.max_age_days * 86400
+        records = []
+        for target in self.directory.glob("*-chatcmpl-*.json"):
+            if not re.fullmatch(r"\d{8}T\d{12}Z-chatcmpl-[0-9a-f]{32}\.json", target.name) or target.is_symlink():
+                continue
+            if target.stat().st_mtime < cutoff:
+                target.unlink()
+            else:
+                records.append(target)
+        for target in sorted(records, key=lambda path: path.name, reverse=True)[self.max_records:]:
+            target.unlink()
+
+    def write(self, record: dict) -> None:
+        if self.directory is None:
+            return
+        try:
+            if not re.fullmatch(r"chatcmpl-[0-9a-f]{32}", record["request_id"]):
+                raise ValueError("Invalid record request ID")
+            stamp = datetime.fromtimestamp(record["started_at_unix"], timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            target = self.directory / f"{stamp}-{record['request_id']}.json"
+            temporary = target.with_suffix(".json.tmp")
+            with self.lock:
+                try:
+                    temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+                    temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                self.prune()
+                self.last_error = None
+        except (OSError, ValueError) as error:
+            self.last_error = type(error).__name__
+            print(json.dumps({"request_id": record["request_id"], "message_record_error": self.last_error}), flush=True)
 
 
 def allows_browser_origin(origin: str | None) -> bool:
@@ -166,8 +233,13 @@ def main() -> int:
     parser.add_argument("--max-context", type=int, default=8192)
     parser.add_argument("--max-output", type=int, default=256)
     parser.add_argument("--evidence-file", type=Path, default=ROOT / "local-models" / "debug" / "qwen35-2b-bf16-runtime.json")
+    parser.add_argument("--record-messages-dir", type=Path, help="Save complete local request and response JSON in this directory")
+    parser.add_argument("--record-messages-days", type=int, default=7)
+    parser.add_argument("--record-messages-max-files", type=int, default=1000)
+    parser.add_argument("--release-cuda-cache", action="store_true", help="Release unused CUDA allocations after each request for a shared GPU")
     parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
+    recorder = MessageRecorder(args.record_messages_dir, args.record_messages_days, args.record_messages_max_files)
     directory = args.model_path.resolve()
     if not args.verify_only:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -228,6 +300,7 @@ def main() -> int:
             return
 
         def send_headers(self, status: int, content_type: str) -> None:
+            self.last_response_status = status
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             origin = self.headers.get("Origin")
@@ -236,6 +309,9 @@ def main() -> int:
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            if getattr(self, "completion_id", None) is not None:
+                self.send_header("X-Request-ID", self.completion_id)
+                self.send_header("Access-Control-Expose-Headers", "X-Request-ID")
             self.end_headers()
 
         def response(self, status: int, value: dict) -> None:
@@ -255,7 +331,10 @@ def main() -> int:
 
         def do_GET(self) -> None:
             if self.path == "/health":
-                self.response(200, {"status": "ready", **evidence})
+                self.response(200, {"status": "ready", **evidence, "message_recording": recorder.describe(),
+                                    "release_cuda_cache": args.release_cuda_cache,
+                                    "gpu_memory": {"allocated_bytes": torch.cuda.memory_allocated(),
+                                                   "reserved_bytes": torch.cuda.memory_reserved()}})
             elif self.path == "/v1/models":
                 self.response(200, {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "local"}]})
             else:
@@ -267,17 +346,44 @@ def main() -> int:
             if self.path != "/v1/chat/completions":
                 self.response(404, {"error": {"message": "Unknown endpoint"}})
                 return
+            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+            self.completion_id = completion_id
+            started_at = time.time()
+            record = {
+                "schema_version": 1, "request_id": completion_id,
+                "started_at": datetime.fromtimestamp(started_at, timezone.utc).isoformat(),
+                "started_at_unix": started_at, "status": "started",
+                "endpoint": "/v1/chat/completions", "request": None,
+                "response": None, "stream_events": [], "stream_done": False,
+            }
+
+            def save_record(status: str, http_status: int, error=None) -> None:
+                record.update(status=status, http_status=http_status,
+                              finished_at=datetime.now(timezone.utc).isoformat(),
+                              seconds=round(time.time() - started_at, 3))
+                if error is not None:
+                    record["error"] = error
+                recorder.write(record)
+
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_BODY_BYTES:
                     raise ValueError("The JSON request must be between 1 byte and 1 MiB")
-                payload = json.loads(self.rfile.read(length))
+                payload = json.loads(self.rfile.read(length), parse_constant=reject_nonfinite_json)
+                record["request"] = payload
+                recorder.write(record)
                 request = validate_request(payload, args.max_output)
             except (ValueError, TypeError, KeyError) as error:
-                self.response(400, {"error": {"message": str(error), "type": "invalid_request_error"}})
+                result = {"error": {"message": str(error), "type": "invalid_request_error"}}
+                record["response"] = result
+                save_record("error", 400, result["error"])
+                self.response(400, result)
                 return
             if not lock.acquire(blocking=False):
-                self.response(503, {"error": {"message": "The local GPU is busy. Retry after the current request."}})
+                result = {"error": {"message": "The local GPU is busy. Retry after the current request."}}
+                record["response"] = result
+                save_record("error", 503, result["error"])
+                self.response(503, result)
                 return
             streaming = bool(payload.get("stream", False))
             canceled = threading.Event()
@@ -286,8 +392,12 @@ def main() -> int:
             generation_error = []
             generated_tokens = []
             request_started = time.perf_counter()
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            created = int(time.time())
+            created = int(started_at)
+            output_text = ""
+            final_status = "error"
+            final_http_status = 500
+            inputs = None
+            output = None
 
             def send_event(delta: dict, finish_reason=None, usage=None) -> None:
                 event = {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID,
@@ -296,6 +406,8 @@ def main() -> int:
                     event["usage"] = usage
                 self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8"))
                 self.wfile.flush()
+                if recorder.directory is not None:
+                    record["stream_events"].append(event)
 
             try:
                 inputs = tokenizer.apply_chat_template(
@@ -303,6 +415,13 @@ def main() -> int:
                     enable_thinking=False, tokenize=True, return_dict=True, return_tensors="pt",
                 ).to("cuda:0")
                 prompt_tokens = inputs["input_ids"].shape[-1]
+                if recorder.directory is not None:
+                    record["model_input"] = {
+                        **request, "enable_thinking": False, "add_generation_prompt": True,
+                        "prompt_tokens": int(prompt_tokens),
+                        "rendered_prompt": tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=False),
+                    }
+                    recorder.write(record)
                 if prompt_tokens + request["max_tokens"] > args.max_context:
                     raise ValueError(
                         f"Prompt ({prompt_tokens}) and requested output ({request['max_tokens']}) "
@@ -312,6 +431,11 @@ def main() -> int:
                            "use_cache": True, "stopping_criteria": [CancelGeneration(canceled)]}
                 if options["do_sample"]:
                     options.update(temperature=request["temperature"], top_p=request["top_p"])
+                if recorder.directory is not None:
+                    record["model_input"]["generation_options"] = {
+                        key: value for key, value in options.items() if key != "stopping_criteria"
+                    }
+                    recorder.write(record)
                 if streaming:
                     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=False, timeout=1)
 
@@ -358,6 +482,13 @@ def main() -> int:
                 count = generated_tokens[0]
                 finish = "tool_calls" if calls else ("length" if count >= request["max_tokens"] else "stop")
                 usage = {"prompt_tokens": int(prompt_tokens), "completion_tokens": count, "total_tokens": int(prompt_tokens) + count}
+                message = {"role": "assistant", "content": content or None}
+                if calls:
+                    message["tool_calls"] = calls
+                record["response"] = {
+                    "id": completion_id, "object": "chat.completion", "created": created, "model": MODEL_ID,
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage,
+                }
                 if streaming:
                     if request["tools"] and content:
                         send_event({"content": content})
@@ -366,35 +497,55 @@ def main() -> int:
                     send_event({}, finish, usage)
                     self.wfile.write(b"data: [DONE]\n\n")
                     self.wfile.flush()
+                    record["stream_done"] = True
                 else:
-                    message = {"role": "assistant", "content": content or None}
-                    if calls:
-                        message["tool_calls"] = calls
-                    self.response(200, {"id": completion_id, "object": "chat.completion", "created": created, "model": MODEL_ID,
-                                        "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage})
+                    self.response(200, record["response"])
+                final_status = "ok"
+                final_http_status = 200
                 print(json.dumps({"request_id": completion_id, "stream": streaming, **usage,
                                   "seconds": round(time.perf_counter() - request_started, 3), "status": "ok"}), flush=True)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 canceled.set()
+                final_status = "canceled"
+                final_http_status = getattr(self, "last_response_status", 499)
+                record["error"] = {"type": "client_disconnected", "message": "The client disconnected before completion."}
             except Exception as error:
                 canceled.set()
                 error_type = generation_error[0] if generation_error else type(error).__name__
                 message = str(error) if isinstance(error, ValueError) else f"Generation failed: {error_type}. Read runtime metadata and GPU memory."
+                result = {"error": {"message": message, "type": error_type}}
+                record["response"] = result
+                record["error"] = result["error"]
+                final_http_status = 200 if stream_started else (400 if isinstance(error, ValueError) else 500)
                 if stream_started:
                     try:
-                        self.wfile.write(("data: " + json.dumps({"error": {"message": message}}) + "\n\n").encode("utf-8"))
+                        event = {"error": {"message": message}}
+                        self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode("utf-8"))
                         self.wfile.write(b"data: [DONE]\n\n")
                         self.wfile.flush()
+                        if recorder.directory is not None:
+                            record["stream_events"].append(event)
+                        record["stream_done"] = True
                     except OSError:
                         pass
                 else:
-                    self.response(400 if isinstance(error, ValueError) else 500, {"error": {"message": message}})
+                    self.response(final_http_status, result)
                 print(json.dumps({"request_id": completion_id, "status": "error", "error_type": error_type}), flush=True)
             finally:
                 canceled.set()
-                if worker is not None:
+                if worker is not None and worker.ident is not None:
                     worker.join()
-                lock.release()
+                try:
+                    if args.release_cuda_cache:
+                        inputs = None
+                        output = None
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                finally:
+                    lock.release()
+                if recorder.directory is not None:
+                    record["model_output_text"] = output_text
+                save_record(final_status, final_http_status)
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.daemon_threads = True

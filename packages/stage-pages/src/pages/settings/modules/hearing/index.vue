@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const hearingStore = useHearingStore()
-const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
+const { configured, autoSendEnabled, autoSendDelay, endJudgeEnabled, endJudgeAudioEndpoint, rephraseEnabled, rephraseProvider, rephraseModel } = storeToRefs(hearingStore)
 const wakeWords = useWakeWordsStore()
 
 const providersStore = useProviderStore()
@@ -115,6 +115,13 @@ const pages = computed(() => [
             v-model="endJudgeEnabled"
             :label="t('settings.pages.modules.hearing.sections.section.end-judge.enabled')"
             :description="t('settings.pages.modules.hearing.sections.section.end-judge.enabled-description')"
+          />
+          <FieldInput
+            v-if="endJudgeEnabled"
+            v-model="endJudgeAudioEndpoint"
+            :label="t('settings.pages.modules.hearing.sections.section.end-judge.audio-endpoint')"
+            :description="t('settings.pages.modules.hearing.sections.section.end-judge.audio-endpoint-description')"
+            placeholder="http://127.0.0.1:18085/v1/turn"
           />
         </div>
 

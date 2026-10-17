@@ -38,6 +38,10 @@ export type SpeechOutput = {
   readonly onPlaybackEnd?: (clip: SpeechClip, end: SpeechClipEnd) => void
 } & ({
   readonly synthesize: SpeechPipelineOptions<Blob>['tts']
+  /** The provider can replace text boundaries without changing other outputs' segmentation. */
+  readonly segmenter?: SpeechPipelineOptions<Blob>['segmenter']
+  /** Omission preserves the pipeline default. A local GPU provider can serialize its generation. */
+  readonly ttsMaxConcurrent?: SpeechPipelineOptions<Blob>['ttsMaxConcurrent']
 } | {
   /** The provider consumes text and emits audio parts concurrently. Its adapter owns decoding and source coordinates. */
   readonly stream: (text: ReadableStream<string>, signal: AbortSignal) => Promise<ReadableStream<SpeechAudio>>
@@ -92,6 +96,8 @@ export class SpeechStream {
     }
     const pending = new Set<PlaybackItem<Blob>>()
     const pipeline = createSpeechPipeline<Blob>({
+      segmenter: output.segmenter,
+      ttsMaxConcurrent: output.ttsMaxConcurrent,
       tts: async (request, signal) => {
         try {
           const audio = await output.synthesize(request, AbortSignal.any([signal, this.signal, response.signal]))

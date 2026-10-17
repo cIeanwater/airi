@@ -1,515 +1,105 @@
-<picture>
-  <source
-    width="100%"
-    srcset="./docs/assets/banner-dark-1280x640.avif"
-    media="(prefers-color-scheme: dark)"
-  />
-  <source
-    width="100%"
-    srcset="./docs/assets/banner-light-1280x640.avif"
-    media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-  />
-  <img width="250" src="./docs/assets/banner-light-1280x640.avif" />
-</picture>
+# Humanning
 
-<h1 align="center">Project AIRI</h1>
+A local companion with persistent memory, inspectable conversations, and voice and avatar interaction.
 
-<p align="center">Re-creating Neuro-sama, a soul container of AI waifu / virtual characters to bring them into our world.</p>
+[简体中文](docs/README.zh-CN.md) · [Project overview](docs/ai/project-overview.zh-CN.md) · [Upstream AIRI](https://github.com/moeru-ai/airi)
 
-<p align="center">
-  [<a href="https://discord.gg/TgQ3Cu2F7A">Join Discord Server</a>] [<a href="https://airi.moeru.ai">Try it</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.zh-CN.md">简体中文</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.ja-JP.md">日本語</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.ru-RU.md">Русский</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.vi.md">Tiếng Việt</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.fr.md">Français</a>] [<a href="https://github.com/moeru-ai/airi/blob/main/docs/README.ko-KR.md">한국어</a>]
-</p>
+Humanning builds on [moeru-ai/AIRI](https://github.com/moeru-ai/airi). This repository focuses on a local desktop companion and evidence for its behavior.
+The AIRI application framework, character renderers, and provider interfaces come from upstream.
 
-<p align="center">
-  <a href="https://deepwiki.com/moeru-ai/airi"><img src="https://deepwiki.com/badge.svg"></a>
-  <a href="https://github.com/moeru-ai/airi/blob/main/LICENSE"><img src="https://img.shields.io/github/license/moeru-ai/airi.svg?style=flat&colorA=080f12&colorB=1fa669"></a>
-  <a href="https://discord.gg/TgQ3Cu2F7A"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FTgQ3Cu2F7A%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&suffix=%20members&logo=discord&logoColor=white&label=%20&color=7389D8&labelColor=6A7EC2"></a>
-  <a href="https://x.com/proj_airi"><img src="https://img.shields.io/badge/%40proj__airi-black?style=flat&logo=x&labelColor=%23101419&color=%232d2e30"></a>
-  <a href="https://t.me/+7M_ZKO3zUHFlOThh"><img src="https://img.shields.io/badge/Telegram-%235AA9E6?logo=telegram&labelColor=FFFFFF"></a>
-  <a href="./docs/wechat.md"><img src="https://img.shields.io/badge/WeChat-%2307C160?logo=wechat&logoColor=%2307C160&labelColor=FFFFFF"></a>
-  <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=9g00d%2BZS7nORzcJugNNddJ7rCghZTIR7fhXabGwch2S%2BG%2BKGIKwlN1N2nIqkh2jg&busi_data=eyJncm91cENvZGUiOiIxMDU4MTU2Njk3IiwidG9rZW4iOiJmcnkra1hWNFIxNytEcG0zcHRUdVJIaldlRDFxN0dzK080QWtvTEdOQjJkNEY2eUFta1g1clNpbkxSMS9FQWFYIiwidWluIjoiMTI2MDkwNzMzNSJ9&data=b1eJrwn3GVOUh7YIxZ7l9vHQo99HPmRxKPpMKlDCmfzx8Y57IXb2EZCMaOC9rVTd2U558qpNjwUYUWlPHxVHvg&svctype=4&tempid=h5_group_info"><img src="https://img.shields.io/badge/QQ-%2312B7F5?logo=qq&labelColor=FFFFFF"></a>
-</p>
+## What this repository adds
 
-<p float="left" align="center">
-  <!-- readme-section:release-binary-windows -->
-  <a href="https://github.com/moeru-ai/airi/releases/download/v0.12.0-beta.5/AIRI-0.12.0-beta.5-windows-x64-setup.exe">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.windows.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.windows.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/download-buttons/download-buttons.windows.light.en-US.avif" />
-    </picture>
-  </a>
-  <!-- readme-section:release-binary-macos -->
-  <a href="https://github.com/moeru-ai/airi/releases/download/v0.12.0-beta.5/AIRI-0.12.0-beta.5-darwin-arm64.dmg">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.macos.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.macos.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/download-buttons/download-buttons.macos.light.en-US.avif" />
-    </picture>
-  </a>
-  <a href="https://github.com/moeru-ai/airi/releases/latest">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.linux.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.linux.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/download-buttons/download-buttons.linux.light.en-US.avif" />
-    </picture>
-  </a>
-</p>
+| Area | Current work | Details |
+| --- | --- | --- |
+| Local inference | Qwen3.5-2B with BF16 parameters, an OpenAI-compatible API, and JSON or SSE responses | [Model service](docs/ai/local-qwen35-2b-bf16.zh-CN.md) |
+| Long-term memory | Consent for each user and character, local retrieval, editing, deletion, and JSON import/export | [Memory package](packages/memory-local/README.md) |
+| Memory evaluation | Reproducible LongMemEval-S retrieval runs, pinned data, machine-readable reports, and stated limits | [Evaluation](packages/memory-local/benchmarks/README.md) |
+| Durable conversations | Wait for assistant storage before completion, export current messages, and reject stale account writes | [Persistence](docs/ai/adr/2026-10-16-local-chat-persistence.zh-CN.md) |
+| Actual model messages | Optional local JSON files with request messages, the rendered prompt, responses, tool calls, and errors | [Message JSON](docs/ai/local-message-json.zh-CN.md) |
+| Voice interaction | Bundled offline VAD, automatic turn submission, speech playback, and tests of the complete local flow | [Voice conversation](docs/ai/local-voice-conversation.zh-CN.md) |
+| Avatar interaction | Emotion and motion controls, valid motion selection, Live2D expressions, and audio-driven mouth movement | [Expression evidence](docs/ai/validation/2026-10-17-voice-expression-link.zh-CN.md) |
 
-<p float="left" align="center">
-  <a href="https://airi.moeru.ai">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/QR%20code%20button/section.cards.qrcode.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/QR%20code%20button/section.cards.qrcode.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/QR%20code%20button/section.cards.qrcode.light.en-US.avif" />
-    </picture>
-  </a>
-  <a href="https://airi.moeru.ai">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.mobile.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.mobile.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/download-buttons/download-buttons.mobile.light.en-US.avif" />
-    </picture>
-  </a>
-  <a href="https://airi.moeru.ai">
-    <picture>
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.browser.dark.en-US.avif"
-        media="(prefers-color-scheme: dark)"
-      />
-      <source
-        width="33%"
-        srcset="./docs/assets/download-buttons/download-buttons.browser.light.en-US.avif"
-        media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
-      />
-      <img width="33%" src="./docs/assets/download-buttons/download-buttons.browser.light.en-US.avif" />
-    </picture>
-  </a>
-</p>
+The tested local voice setup uses Smart Turn v3.2 and Qwen3-TTS-1.7B CustomVoice with Serena.
+ACT controls set each segment's emotion before synthesis. Automatic submission and actual playback passed the [integration check](docs/ai/validation/2026-10-17-modern-voice.zh-CN.md).
+Speech synthesis remains slower than playback. The guides record latency, endpoint errors, and interruption limits.
 
-<p align="center">
-  <a href="https://www.producthunt.com/products/airi?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-airi" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=993524&theme=neutral&t=1752696535380" alt="AIRI - A&#0032;container&#0032;of&#0032;cyber&#0032;living&#0032;souls&#0044;&#0032;re&#0045;creation&#0032;of&#0032;Neuro&#0045;sama | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
-  <a href="https://trendshift.io/repositories/14636" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14636" alt="moeru-ai%2Fairi | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-  <a href="https://trendshift.io/repositories/14636" target="_blank"><img src="https://trendshift.io/api/badge/trendshift/repositories/14636/weekly" alt="AIRI - #1 repository of the week across all languages | Trendshift" width="250" height="55" /></a>
-</p>
+## Data that you can inspect
 
-> Heavily inspired by [Neuro-sama](https://www.youtube.com/@Neurosama)
+Three separate records serve different purposes:
 
-> [!TIP]
-> On Windows, you can also install AIRI with [winget](https://learn.microsoft.com/windows/package-manager/winget/):
->
-> ```powershell
-> winget install MoeruAI.AIRI
-> ```
->
-> Or install AIRI with [Scoop](https://scoop.sh/):
->
-> ```powershell
-> scoop bucket add airi https://github.com/moeru-ai/airi
-> scoop install airi/airi
-> ```
->
-> On macOS, you can install AIRI with [Homebrew Cask](https://brew.sh/) without adding a custom tap:
->
-> ```sh
-> brew install --cask airi
-> ```
+- **Chat history** preserves conversations in local IndexedDB. The application can export a portable JSON backup.
+- **Long-term memory** stores selected evidence with separate consent, scope, and deletion controls.
+- **Model request records** preserve exact inputs and outputs from the local model service after recording is enabled.
 
-> [!WARNING]
-> **Attention:** We **do not** have any officially minted cryptocurrency or token associated with this project. Please check the information and proceed with caution.
+Memory is disabled by default for each user and character.
+Retrieved memory enters the selected chat provider's request. A remote provider receives that evidence.
+Local JSON records and exports contain conversation content and require the same care as the conversations.
 
-> [!NOTE]
->
-> We've got a whole dedicated organization [@proj-airi](https://github.com/proj-airi) for all the sub-projects born from Project AIRI. Check it out!
->
-> RAG, memory system, embedded database, icons, Live2D utilities, and more!
+Model weights, browser profiles, credentials, personal recordings, and private conversation exports are not part of the source distribution.
+The local model service does not download weights automatically.
 
-> [!TIP]
-> You can translate AIRI on [Crowdin](https://crowdin.com/project/proj-airi), or open a pull request that changes `packages/i18n/src/locales/`. Both ways update the same translations.
->
-> Do not submit a translation that is the same as the English text. Review rejects it. A string without a translation shows the English text.
->
-> <a href="https://crowdin.com/project/proj-airi" target="_blank" rel="nofollow"><img style="width: 140px; height: 40px;" src="https://badges.crowdin.net/badge/light/crowdin-on-dark.png" srcset="https://badges.crowdin.net/badge/light/crowdin-on-dark.png 1x, https://badges.crowdin.net/badge/light/crowdin-on-dark@2x.png 2x" alt="Crowdin | Agile localization for tech companies" width="140" height="40" /></a>
+## Run from source
 
-Have you dreamed about having a cyber living being (cyber waifu, digital pet) or digital companion that could play with and talk to you?
+The release workflow uses Node.js 26.7.0. The root package pins pnpm 11.24.0.
+Local model runtimes and weights require separate preparation. See the linked service guides for their tested environments.
 
-With the power of modern large language models like [ChatGPT](https://chatgpt.com) and famous [Claude](https://claude.ai), asking a virtual being to roleplay and chat with us is already easy enough for everyone. Platforms like [Character.ai (a.k.a. c.ai)](https://character.ai) and [JanitorAI](https://janitorai.com/) as well as local playgrounds like [SillyTavern](https://github.com/SillyTavern/SillyTavern) are already good-enough solutions for a chat based or visual adventure game like experience.
-
-> But, what about the abilities to play games? And see what you are coding at? Chatting while playing games, watching videos, and is capable of doing many other things.
-
-Perhaps you know [Neuro-sama](https://www.youtube.com/@Neurosama) already. She is currently the best virtual streamer capable of playing games, chatting, and interacting with you and the participants. Some also call this kind of being "digital human." **Sadly, as it's not open sourced, you cannot interact with her after her live streams go offline**.
-
-Therefore, this project, AIRI, offers another possibility here: **let you own your digital life, cyber living, easily, anywhere, anytime**.
-
-## Recent DevLogs & Stories
-
-- [DevLog @ 2026.03.23: Mobile performance and game engine exploration](https://airi.moeru.ai/docs/en/blog/DevLog-2026.03.23/) - March 23, 2026
-- [DevLog @ 2026.03.14: VRM stage lifecycle, cache, and observability](https://airi.moeru.ai/docs/en/blog/DevLog-2026.03.14/) - March 14, 2026
-- [DevLog @ 2026.02.16: Dome Keeper data collection and training pipeline](https://airi.moeru.ai/docs/en/blog/DevLog-2026.02.16/) - February 16, 2026
-- [DevLog @ 2026.01.01: AIRI Pocket and FlowChat memory experiments](https://airi.moeru.ai/docs/en/blog/DevLog-2026.01.01/) - January 1, 2026
-- [DevLog @ 2025.10.20: Electron migration, new models, and Moeru AI updates](https://airi.moeru.ai/docs/en/blog/DevLog-2025.10.20/) - October 20, 2025
-- [DevLog @ 2025.08.26: Pure vision progress for airi-factorio](https://airi.moeru.ai/docs/en/blog/DevLog-2025.08.26/) - August 26, 2025
-- [DevLog @ 2025.08.05: AIRI v0.7 release highlights](https://airi.moeru.ai/docs/en/blog/DevLog-2025.08.05/) - August 5, 2025
-- [DevLog @ 2025.08.01: Streaming text animation and grapheme clusters](https://airi.moeru.ai/docs/en/blog/DevLog-2025.08.01/) - August 1, 2025
-- [DevLog @ 2025.07.18: Rethinking airi-factorio with Factorio Learning Environment](https://airi.moeru.ai/docs/en/blog/DevLog-2025.07.18/) - July 18, 2025
-- [DreamLog 0x1: The backstory of Project AIRI](https://airi.moeru.ai/docs/en/blog/DreamLog-0x1/) - June 16, 2025
-- More on the [documentation site](https://airi.moeru.ai/docs/en/)
-
-## What's So Special About This Project?
-
-Unlike the other AI driven VTuber open source projects, アイリ was built with support of many Web technologies such as [WebGPU](https://www.w3.org/TR/webgpu/), [WebAudio](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API), [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers), [WebAssembly](https://webassembly.org/), [WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket), etc. from the first day.
-
-> [!TIP]
-> Worrying about the performance drop since we are using Web related technologies?
->
-> Don't worry, while the Web browser version is meant to give an insight into how much we can push and do inside browsers and webviews, we will never fully rely on this. The desktop version of AIRI is capable of using native [NVIDIA CUDA](https://developer.nvidia.com/cuda-toolkit) and [Apple Metal](https://developer.apple.com/metal/) by default (thanks to HuggingFace & the beloved [candle](https://github.com/huggingface/candle) project), without any complex dependency management. Considering the tradeoff, it is partially powered by Web technologies for graphics, layouts, animations, and the WIP plugin system for everyone to integrate things.
-
-This means that **アイリ is capable of running on modern browsers and devices** and even on mobile devices (already done with PWA support). This brings a lot of possibilities for us (the developers) to build and extend the power of アイリ VTuber to the next level, while still leaving the flexibility for users to enable features that require TCP connections or other non-Web technologies such as connecting to a Discord voice channel or playing Minecraft and Factorio with friends.
-
-> [!NOTE]
->
-> We are still in the early stage of development where we are seeking out talented developers to join us and help us to make アイリ a reality.
->
-> It's ok if you are not familiar with Vue.js, TypeScript, and devtools required for this project, you can join us as an artist, designer, or even help us to launch our first live stream.
->
-> Even if you are a big fan of React, Svelte or even Solid, we welcome you. You can open a sub-directory to add features that you want to see in アイリ, or would like to experiment with.
->
-> Fields (and related projects) that we are looking for:
->
-> - Live2D modeller
-> - VRM modeller
-> - VRChat avatar designer
-> - Computer Vision
-> - Reinforcement Learning
-> - Speech Recognition
-> - Speech Synthesis
-> - ONNX Runtime
-> - Transformers.js
-> - vLLM
-> - WebGPU
-> - Three.js
-> - WebXR ([checkout the another project](https://github.com/moeru-ai/chat) we have under the @moeru-ai organization)
->
-> **If you are interested, why not introduce yourself here? [Would like to join part of us to build AIRI?](https://github.com/moeru-ai/airi/discussions/33)**
-
-## Current Progress & Roadmap
-
-Capable of
-
-- [x] Brain
-  - [x] Play [Minecraft](https://www.minecraft.net)
-  - [x] Play [Factorio](https://www.factorio.com) (WIP, but [PoC and demo available](https://github.com/moeru-ai/airi-factorio))
-  - [x] Play [Kerbal Space Program](https://www.kerbalspaceprogram.com/) (announcement TBD)
-  - [ ] Co-play [Helldivers 2](https://www.playstation.com/en-hk/games/helldivers-2/pc/) (WIP)
-  - [x] Chat in [Telegram](https://telegram.org)
-  - [x] Chat in [Discord](https://discord.com)
-  - [ ] Memory
-    - [x] Pure in-browser database support (DuckDB WASM | `pglite`)
-    - [ ] Memory Alaya (WIP)
-  - [ ] Pure in-browser local (WebGPU) inference
-- [x] Ears
-  - [x] Audio input from browser
-  - [x] Audio input from [Discord](https://discord.com)
-  - [x] Client side speech recognition
-  - [x] Client side talking detection
-- [x] Mouth
-  - [x] Multi-provider voice synthesis, including [ElevenLabs](https://elevenlabs.io/), Microsoft/Azure Speech, OpenAI-compatible TTS, Alibaba Cloud Model Studio, and local Kokoro TTS
-- [x] Body
-  - [x] VRM support
-    - [x] Control VRM model
-  - [x] VRM model animations
-    - [x] Auto blink
-    - [x] Auto look at
-    - [x] Idle eye movement
-  - [x] Live2D support
-    - [x] Control Live2D model
-  - [x] Live2D model animations
-    - [x] Auto blink
-    - [x] Auto look at
-    - [x] Idle eye movement
-
-## Development
-
-> For detailed instructions to develop this project, follow [CONTRIBUTING.md](./.github/CONTRIBUTING.md)
-
-> [!NOTE]
-> By default, `pnpm dev` will start the development server for the Stage Web (browser version). If you would
-> like to try developing the desktop version, please make sure you read [CONTRIBUTING.md](./.github/CONTRIBUTING.md)
-> to setup the environment correctly.
-
-```shell
-pnpm i
-pnpm dev
+```sh
+git clone https://github.com/cIeanwater/airi.git humanning
+cd humanning
+pnpm install
 ```
 
-### Stage Web (Browser Version at [airi.moeru.ai](https://airi.moeru.ai))
+Start the desktop application:
 
-```shell
-pnpm dev
-```
-
-### Stage Tamagotchi (Desktop Version)
-
-```shell
+```sh
 pnpm dev:tamagotchi
 ```
 
-A Nix package for Tamagotchi is included. To run airi with Nix, first make sure to enable flakes, then run:
+Or start the browser application:
 
-```shell
-nix run github:moeru-ai/airi
+```sh
+pnpm dev:web
 ```
 
-#### NixOS
+These commands start the application. Configure and start the model, transcription, and speech services separately.
+Existing character cards store provider choices. Change the active card as well as the global provider.
+Machine-specific paths in the local service guides describe the tested installation.
 
-Electron requires shared libraries that aren't in standard paths on NixOS. Use the FHS shell defined in `flake.nix`:
+This fork has no separately verified binary release. Upstream AIRI installers do not include the changes described here.
 
-```shell
-nix develop .#fhs
-pnpm dev:tamagotchi
+## Evaluation and development
+
+The application-budget memory report records 79.61% session recall and 60.00% turn recall at six chunks on 470 answerable LongMemEval-S questions.
+These are lexical retrieval results, not answer accuracy or a Chinese-language evaluation.
+See the [protocol and reports](packages/memory-local/benchmarks/README.md) for budgets, source hashes, and limitations.
+
+Recent integration records:
+
+- [Audio, model replies, and persistence](docs/ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)
+- [Offline voice detection](docs/ai/validation/2026-10-17-offline-voice-detection.zh-CN.md)
+- [Voice turn completion](docs/ai/adr/2026-10-17-voice-turn-completion.zh-CN.md)
+- [Voice and expression interaction](docs/ai/validation/2026-10-17-voice-expression-link.zh-CN.md)
+
+Run the root checks:
+
+```sh
+pnpm typecheck
+pnpm lint
 ```
 
-### Stage Pocket (Mobile Version)
+Run the memory package tests:
 
-Start the development server for the capacitor:
-
-```shell
-pnpm dev:pocket:ios --target "<DEVICE_ID_OR_SIMULATOR_NAME>"
-# Or
-CAPACITOR_DEVICE_ID_IOS="<DEVICE_ID_OR_SIMULATOR_NAME>" pnpm dev:pocket:ios
+```sh
+pnpm -F @proj-airi/memory-local test
 ```
 
-Quote the target: simulator names such as `iPhone 16 Pro` contain spaces.
+Some voice integration tests need local services and explicit environment variables. Their guides record those requirements.
+The recorded results describe specific runs, not a guarantee for every operating system or audio device.
 
-You can see the list of available devices and simulators by running `pnpm -F @proj-airi/stage-pocket exec cap run ios --list`. `@capacitor/cli` is declared in `apps/stage-pocket`, so `cap` does not resolve from the repository root.
+## Credits and license
 
-If you need to connect server channel on pocket in wireless mode, you need to start tamagotchi as root:
+Humanning is a derivative of [Project AIRI](https://github.com/moeru-ai/airi) by Neko Ayaka and the Moeru AI contributors.
+The [upstream documentation](https://airi.moeru.ai/docs/) describes the broader AIRI platform.
 
-```shell
-sudo pnpm dev:tamagotchi
-```
-
-Then enable secure websocket in tamagotchi `settings/connections`.
-
-### Documentation Site
-
-The documentation site lives in [moeru-ai/airi-docs](https://github.com/moeru-ai/airi-docs).
-
-### Publish
-
-Run `bumpp` to update the monorepo version:
-
-```shell
-npx bumpp --no-commit --no-tag
-```
-
-## Support of LLM API Providers (powered by [xsai](https://github.com/moeru-ai/xsai))
-
-- [x] [AIHubMix (recommended)](https://aihubmix.com/?aff=OOiX)
-- [x] [OpenRouter](https://openrouter.ai/)
-- [x] [vLLM](https://github.com/vllm-project/vllm)
-- [x] [SGLang](https://github.com/sgl-project/sglang)
-- [x] [Ollama](https://github.com/ollama/ollama)
-- [x] [302.AI (sponsored)](https://share.302.ai/514k2v)
-- [x] [OpenAI](https://platform.openai.com/docs/guides/gpt/chat-completions-api)
-  - [x] [Azure OpenAI API](https://learn.microsoft.com/en-us/azure/ai-services/openai/reference)
-- [x] [Anthropic Claude](https://anthropic.com)
-  - [ ] [AWS Claude](https://docs.anthropic.com/en/api/claude-on-amazon-bedrock) (PR welcome)
-- [x] [DeepSeek](https://www.deepseek.com/)
-- [x] [Qwen](https://help.aliyun.com/document_detail/2400395.html)
-- [x] [Google Gemini](https://developers.generativeai.google)
-- [x] [xAI](https://x.ai/)
-- [x] [Groq](https://wow.groq.com/)
-- [x] [Mistral](https://mistral.ai/)
-- [x] [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/)
-- [x] [Together.ai](https://www.together.ai/)
-- [x] [Fireworks.ai](https://fireworks.ai/)
-- [x] [Novita](https://www.novita.ai/)
-- [x] [Zhipu](https://bigmodel.cn)
-- [x] [SiliconFlow](https://cloud.siliconflow.cn/i/rKXmRobW)
-- [x] [Stepfun](https://platform.stepfun.com/)
-- [x] [Baichuan](https://platform.baichuan-ai.com)
-- [x] [Minimax](https://api.minimax.chat/)
-- [x] [Moonshot AI](https://platform.moonshot.cn/)
-- [x] [ModelScope](https://modelscope.cn/docs/model-service/API-Inference/intro)
-- [x] [Player2](https://player2.game/)
-- [x] [Tencent Cloud](https://cloud.tencent.com/document/product/1729)
-- [ ] [Sparks](https://www.xfyun.cn/doc/spark/Web.html) (PR welcome)
-- [ ] [Volcano Engine](https://www.volcengine.com/experience/ark?utm_term=202502dsinvite&ac=DSASUQY5&rc=2QXCA1VI) (PR welcome)
-- [x] [Xiaomi Mimo](https://platform.xiaomimimo.com)
-
-## Sub-projects Born from This Project
-
-- [Awesome AI VTuber](https://github.com/proj-airi/awesome-ai-vtuber): A curated list of AI VTubers and related projects
-- [`unspeech`](https://github.com/moeru-ai/unspeech): Universal endpoint proxy server for `/audio/transcriptions` and `/audio/speech`, like LiteLLM but for any ASR and TTS
-- [`hfup`](https://github.com/moeru-ai/hfup): tools to help on deploying, bundling to HuggingFace Spaces
-- [`xsai-transformers`](https://github.com/moeru-ai/xsai-transformers): Experimental [🤗 Transformers.js](https://github.com/huggingface/transformers.js) provider for [xsAI](https://github.com/moeru-ai/xsai).
-- [WebAI: Realtime Voice Chat](https://github.com/proj-airi/webai-realtime-voice-chat): Full example of implementing ChatGPT's realtime voice from scratch with VAD + STT + LLM + TTS.
-- [`@proj-airi/drizzle-duckdb-wasm`](https://github.com/moeru-ai/airi/tree/main/packages/drizzle-duckdb-wasm/README.md): Drizzle ORM driver for DuckDB WASM
-- [`@proj-airi/duckdb-wasm`](https://github.com/moeru-ai/airi/tree/main/packages/duckdb-wasm/README.md): Easy to use wrapper for `@duckdb/duckdb-wasm`
-- [AIRI Factorio](https://github.com/moeru-ai/airi-factorio): Allow AIRI to play Factorio.
-- [AIRI DomeKeeper](https://github.com/proj-airi/game-playing-ai-dome-keeper): Allow AIRI to play DomeKeeper.
-- [Factorio RCON API](https://github.com/nekomeowww/factorio-rcon-api): RESTful API wrapper for Factorio headless server console
-- [`autorio`](https://github.com/moeru-ai/airi-factorio/tree/main/packages/autorio): Factorio automation library
-- [`tstl-plugin-reload-factorio-mod`](https://github.com/moeru-ai/airi-factorio/tree/main/packages/tstl-plugin-reload-factorio-mod): Reload Factorio mod when developing
-- [Velin](https://github.com/luoling8192/velin): Use Vue SFC and Markdown to write easy to manage stateful prompts for LLM
-- [`demodel`](https://github.com/moeru-ai/demodel): Easily boost the speed of pulling your models and datasets from various of inference runtimes.
-- [`inventory`](https://github.com/moeru-ai/inventory): Centralized model catalog and default provider configurations backend service
-- [MCP Launcher](https://github.com/moeru-ai/mcp-launcher): Easy to use MCP builder & launcher for all possible MCP servers, just like Ollama for models!
-- [🥺 SAD](https://github.com/moeru-ai/sad): Documentation and notes for self-host and browser running LLMs.
-
-```mermaid
-flowchart LR
-  subgraph Apps[Stage applications]
-    Web[stage-web]
-    Desktop[stage-tamagotchi]
-    Pocket[stage-pocket\nexperimental]
-  end
-
-  subgraph Shared[Shared product packages]
-    StageUI[stage-ui]
-    Domain[core-agent\ncore-character]
-    Audio[pipelines-audio]
-    Renderers[stage-ui-live2d\nstage-ui-three and renderers]
-    SDK[server-sdk\nserver-shared]
-  end
-
-  subgraph Channel[Desktop server channel]
-    Runtime[server-runtime]
-  end
-
-  subgraph Integrations[Source-configured integrations]
-    Discord[discord-bot]
-    Minecraft[minecraft-bot]
-    Other[Telegram, Factorio, MCP, and others]
-  end
-
-  subgraph Hosted[Hosted backend]
-    Edge[Caddy]
-    API[api-server]
-    Auth[auth-server]
-    Database[(PostgreSQL)]
-    Cache[(Redis)]
-  end
-
-  Web --> StageUI
-  Desktop --> StageUI
-  Pocket --> StageUI
-  StageUI --> Domain
-  StageUI --> Audio
-  StageUI --> Renderers
-  StageUI --> SDK
-  Desktop --> Runtime
-  SDK <-->|server channel| Runtime
-  Discord --> SDK
-  Minecraft --> SDK
-  Other -. optional .-> SDK
-  Edge --> API
-  Edge --> Auth
-  API --> Database
-  API --> Cache
-  Auth --> Database
-  Auth --> Cache
-```
-
-## Similar Projects
-
-### Open sourced ones
-
-- [kimjammer/Neuro: A recreation of Neuro-Sama originally created in 7 days.](https://github.com/kimjammer/Neuro): very well completed implementation.
-- [SugarcaneDefender/z-waif](https://github.com/SugarcaneDefender/z-waif): Great at gaming, autonomous, and prompt engineering
-- [semperai/amica](https://github.com/semperai/amica/): Great at VRM, WebXR
-- [elizaOS/eliza](https://github.com/elizaOS/eliza): Great examples and software engineering on how to integrate agent into various of systems and APIs
-- [ardha27/AI-Waifu-Vtuber](https://github.com/ardha27/AI-Waifu-Vtuber): Great about Twitch API integrations
-- [InsanityLabs/AIVTuber](https://github.com/InsanityLabs/AIVTuber): Nice UI and UX
-- [IRedDragonICY/vixevia](https://github.com/IRedDragonICY/vixevia)
-- [t41372/Open-LLM-VTuber](https://github.com/t41372/Open-LLM-VTuber)
-- [PeterH0323/Streamer-Sales](https://github.com/PeterH0323/Streamer-Sales)
-
-### Non-open-sourced ones
-
-- https://clips.twitch.tv/WanderingCaringDeerDxCat-Qt55xtiGDSoNmDDr https://www.youtube.com/watch?v=8Giv5mupJNE
-- https://clips.twitch.tv/TriangularAthleticBunnySoonerLater-SXpBk1dFso21VcWD
-- https://www.youtube.com/@NOWA_Mirai
-
-## Project Status
-
-![Repobeats analytics image](https://repobeats.axiom.co/api/embed/a1d6fe2c13ea2bb53a5154435a71e2431f70c2ee.svg 'Repobeats analytics image')
-
-## Acknowledgements
-
-- [Reka UI](https://github.com/unovue/reka-ui): for designing the documentation site, the new landing page is based on this, as well as implementing a massive amount of UI components. (shadcn-vue is using Reka UI as the headless, do checkout!)
-- [pixiv/ChatVRM](https://github.com/pixiv/ChatVRM)
-- [josephrocca/ChatVRM-js: A JS conversion/adaptation of parts of the ChatVRM (TypeScript) code for standalone use in OpenCharacters and elsewhere](https://github.com/josephrocca/ChatVRM-js)
-- Design of UI and style was inspired by [Cookard](https://store.steampowered.com/app/2919650/Cookard/), [UNBEATABLE](https://store.steampowered.com/app/2240620/UNBEATABLE/), and [Sensei! I like you so much!](https://store.steampowered.com/app/2957700/_/), and artworks of [Ayame by Mercedes Bazan](https://dribbble.com/shots/22157656-Ayame) with [Wish by Mercedes Bazan](https://dribbble.com/shots/24501019-Wish)
-- [mallorbc/whisper_mic](https://github.com/mallorbc/whisper_mic)
-- [`xsai`](https://github.com/moeru-ai/xsai): Implemented a decent amount of packages to interact with LLMs and models, like [Vercel AI SDK](https://sdk.vercel.ai/) but way small.
-
-## Supporters
-
-<p align="center">
-  <strong>Thank you for supporting Project AIRI through OpenCollective, Patreon, and Ko-fi.</strong>
-</p>
-
-<p align="center">
-  <img src="./docs/assets/sponsors/sponsors.svg" alt="Project AIRI supporters" />
-</p>
-
-## Special Thanks
-
-Special thanks to all contributors for their contributions to Project AIRI ❤️
-
-<a href="https://github.com/moeru-ai/airi/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=moeru-ai/airi" />
-</a>
-
-## Star History
-
-<a href="https://star-history.dera.page/#moeru-ai/airi&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=moeru-ai/airi&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=moeru-ai/airi&type=Date" />
-    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=moeru-ai/airi&type=Date" />
-  </picture>
-</a>
+The source retains the [MIT license and original copyright notice](LICENSE).
+Model weights, voices, character assets, and third-party components retain their own licenses.

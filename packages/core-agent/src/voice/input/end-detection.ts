@@ -6,6 +6,8 @@ export interface TurnEvidence {
   readonly transcript: { readonly revision: number, readonly text: string }
   readonly context: { readonly revision: number, readonly messages: readonly { role: string, text: string }[] }
   readonly speechRevision: number
+  /** Accepted, non-overlapping VAD speech frames in this input, measured at `audio.sampleRate`. */
+  readonly speechFrames: number
 }
 
 /** Ordered detectors need continuous evidence before they end an input. */

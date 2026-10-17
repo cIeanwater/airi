@@ -11,11 +11,13 @@ import { onScopeDispose, shallowRef, watch } from 'vue'
 
 import { useVoiceController } from '../composables/audio/voice-controller'
 import { traceSpeechOutput } from '../composables/speech-output-trace'
+import { useVoiceAudioEnd } from '../composables/voice-audio-end'
 import { useVoiceDrafts } from '../composables/voice-drafts'
 import { useVoiceEndJudge } from '../composables/voice-end-judge'
 import { useVoiceRephrase } from '../composables/voice-rephrase'
 import { observeInputLevel } from '../libs/voice/input-level'
 import { createVoiceActivityPlugin } from '../libs/voice/voice-activity-plugin'
+import { createVoiceAudioEndPlugin } from '../libs/voice/voice-audio-end-plugin'
 import { createVoiceEndJudgePlugin } from '../libs/voice/voice-end-judge-plugin'
 import { createVoiceRephrasePlugin } from '../libs/voice/voice-rephrase-plugin'
 import { getSpeechBusContext, voiceGenerationEnded, voiceGetTurns, voiceInputCommand, voiceInputLevel, voiceInterrupt, voiceLevelMonitor, voiceRequestSnapshot, voiceRequestTurns, voiceSnapshotChanged, voiceSpeechCommand, voiceTurnsChanged } from '../services/speech/bus'
@@ -35,9 +37,9 @@ const VOICE_REPHRASE_TIMEOUT_MS = 10_000
 /**
  * Silence that ends a speech input.
  *
- * - `pauseMs`: a pause this long can end a finished message. Without the end judge, it is the silence limit.
- * - `graceMs`: with the end judge, the silence limit grows by this much, so a speaker can stop to think.
- *   The judge ends a finished message at the pause, so only an unfinished or unjudged message waits for the grace.
+ * - `pauseMs`: manual drafts use this pause. Automatic messages use the configured send delay.
+ * - `graceMs`: a live transcript gives the end judge this extra time to read an unfinished message.
+ *   File transcription has no text before capture ends, so it never waits for a judgement that cannot run.
  */
 const VOICE_END_SILENCE = { pauseMs: 1200, graceMs: 3000 } as const
 
@@ -101,7 +103,12 @@ export const useVoiceStore = defineStore('voice', () => {
   )
   const { judge } = useVoiceEndJudge()
   controller.use(
-    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled, judge, pauseMs: VOICE_END_SILENCE.pauseMs }),
+    createVoiceEndJudgePlugin({ enabled: () => hearing.endJudgeEnabled && !hearing.endJudgeAudioEndpoint, judge, pauseMs: endPauseMs }),
+    { grants: ['input-control'], onError: event => report(event.error) },
+  )
+  const { judge: judgeAudio } = useVoiceAudioEnd()
+  controller.use(
+    createVoiceAudioEndPlugin({ enabled: () => hearing.endJudgeEnabled && !!hearing.endJudgeAudioEndpoint, judge: judgeAudio, pauseMs: 600, onError: report }),
     { grants: ['input-control'], onError: event => report(event.error) },
   )
 
@@ -109,6 +116,10 @@ export const useVoiceStore = defineStore('voice', () => {
     error.value = errorMessageFrom(cause) ?? 'Voice operation failed'
 
     console.error('[voice]', cause)
+  }
+
+  function endPauseMs() {
+    return hearing.autoSendEnabled ? Math.max(0, hearing.autoSendDelay) : VOICE_END_SILENCE.pauseMs
   }
 
   controller.onInput((attempt) => {
@@ -444,7 +455,13 @@ export const useVoiceStore = defineStore('voice', () => {
       detect: (window, signal) => model.score(window, signal),
       detectWakeWord: options.detectWakeWord ?? wakeWords?.detect,
       enabled: () => !voiceMessages.isRecording,
-      silenceMs: () => hearing.endJudgeEnabled ? VOICE_END_SILENCE.pauseMs + VOICE_END_SILENCE.graceMs : VOICE_END_SILENCE.pauseMs,
+      silenceMs: () => {
+        // Audio semantics work before batch ASR returns text. Six seconds bounds an incomplete or failed judgement.
+        if (hearing.endJudgeEnabled && hearing.endJudgeAudioEndpoint)
+          return 6000
+        const hasLiveTranscript = !!controller.activeInput?.input?.transcript.raw.text.trim()
+        return endPauseMs() + (hearing.endJudgeEnabled && hasLiveTranscript ? VOICE_END_SILENCE.graceMs : 0)
+      },
       // Automatic barge-in requires platform echo cancellation or an external echo classifier.
       acceptSpeech: options.acceptSpeech ?? (async () => !speaking.nowSpeaking || devices.source.echoCancellation),
       // Wake word mode returns no target, so VAD alone cannot start an input. A wake supplies its own target.

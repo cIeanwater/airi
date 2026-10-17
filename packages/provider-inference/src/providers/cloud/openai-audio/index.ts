@@ -44,7 +44,20 @@ function normalizeBaseUrl(baseUrl: string | undefined) {
 }
 
 function createAudioProvider(config: AudioConfig) {
-  return createOpenAI(config.apiKey.trim(), normalizeBaseUrl(config.baseUrl))
+  const provider = createOpenAI(config.apiKey.trim(), normalizeBaseUrl(config.baseUrl))
+  return {
+    ...provider,
+    speech: (model: string, extraOptions?: Record<string, unknown>) => {
+      const request = { ...extraOptions }
+      // Connection ownership stays with this provider. A captured settings
+      // object cannot change the endpoint, credentials, or selected model.
+      delete request.baseUrl
+      delete request.baseURL
+      delete request.apiKey
+      delete request.model
+      return { ...provider.speech(model), ...request }
+    },
+  }
 }
 
 function createTranscriptionProvider(config: AudioConfig) {

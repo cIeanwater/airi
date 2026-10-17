@@ -867,9 +867,11 @@ pages:
               error: '唤醒词模型不可用：{error}'
           end-judge:
             title: 说完判定
-            description: 你停顿时，对话模型会读取转写文本，判断你是否说完了。如果还没说完，AIRI 会再等 3 秒让你继续说。
+            description: 停顿后由模型判断你是否说完。本地音频模型直接听语音和语调，无需等待转写文本。
             enabled: 判断我是否说完了
-            enabled-description: 每次停顿时的转写文本会发送给改写所用的模型。关闭后，AIRI 会在短暂停顿后结束这次语音输入。
+            enabled-description: 音频模式在停顿 0.6 秒后判断，未完句最多等待 6 秒。关闭后使用自动发送的延迟。
+            audio-endpoint: 本地音频说完判定模型
+            audio-endpoint-description: 填入本地 Smart Turn 地址后直接判断音频。留空则由改写模型判断实时转写文本。
           rephrase:
             title: 转写改写
             description: 在转写成为草稿之前，由对话模型修正识别错误并去掉口头禅。原始文本会被保留。

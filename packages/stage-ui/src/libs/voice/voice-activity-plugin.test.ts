@@ -1,4 +1,4 @@
-import type { SpeechInputAttempt, TranscriptionEvent } from '@proj-airi/core-agent'
+import type { SpeechInputAttempt, SpeechSubmission, TranscriptionEvent } from '@proj-airi/core-agent'
 import type { PcmBlock } from '@proj-airi/pipelines-audio'
 
 import { VoiceController } from '@proj-airi/core-agent'
@@ -151,5 +151,69 @@ it('starts an input in wake word mode only after a wake word', async () => {
   expect(startsInputOnSpeech('always-on')).toBe(true)
   expect(startsInputOnSpeech('push-to-talk')).toBe(false)
   expect(listensContinuously('wake-word')).toBe(true)
+  await controller.close()
+})
+
+it('keeps speech across short pauses and captures the next message while batch transcription finishes', async () => {
+  const source = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })
+  const pending = [Promise.withResolvers<string>(), Promise.withResolvers<string>()]
+  const captured: number[][] = []
+  const attempts: SpeechInputAttempt[] = []
+  const submit = vi.fn(async (_submission: SpeechSubmission) => ({ status: 'committed' as const, messageId: 'accepted' }))
+  const controller = new VoiceController({ audio, submit, transcriber: () => ({
+    transcribe(request) {
+      const index = captured.length
+      const samples: number[] = []
+      captured.push(samples)
+      return new ReadableStream<TranscriptionEvent>({ async start(output) {
+        for await (const block of request.audio)
+          samples.push(...block.channels[0])
+        const text = await pending[index].promise
+        output.enqueue({ type: 'update', revision: 1, segments: [{ id: 'words', revision: 1, text, final: true, tokens: [] }] })
+        output.enqueue({ type: 'complete', revision: 1 })
+        output.close()
+      } })
+    },
+  }) })
+  controller.onInput(attempt => attempts.push(attempt))
+  const detect = vi.fn(async window => window.channels[0][0])
+  controller.use(createVoiceActivityPlugin({
+    detect,
+    target: () => ({ sessionId: 'alice', interruptTurns: [] }),
+    silenceMs: 2000,
+  }), { grants: ['input-control', 'cancel-input'] })
+  let frame = 0
+  async function push(duration: number, speech: boolean) {
+    source.write({ range: { sourceId: 'mic', startFrame: frame, endFrame: frame + duration }, sampleRate: 1000, channels: [new Float32Array(duration).fill(speech ? 1 : 0)] })
+    frame += duration
+    await expect.poll(() => detect.mock.calls.length).toBe(frame / 32)
+  }
+
+  await push(320, true)
+  await expect.poll(() => attempts[0]?.state.phase).toBe('capturing')
+  await push(992, false)
+  expect(attempts[0].state.phase).toBe('capturing')
+  await push(320, true)
+  await push(1984, false)
+  expect(attempts[0].state.phase).toBe('capturing')
+  await push(32, false)
+  await expect.poll(() => attempts[0].state.phase).toBe('finalizing')
+  expect(submit).not.toHaveBeenCalled()
+
+  await push(320, true)
+  await expect.poll(() => attempts[1]?.state.phase).toBe('capturing')
+  await push(2016, false)
+  await expect.poll(() => attempts[1].state.phase).toBe('finalizing')
+  pending[0].resolve('continued question')
+  pending[1].resolve('next question')
+
+  await expect(attempts[0].done).resolves.toEqual({ status: 'committed', messageId: 'accepted' })
+  await expect(attempts[1].done).resolves.toEqual({ status: 'committed', messageId: 'accepted' })
+  expect(submit).toHaveBeenCalledTimes(2)
+  expect(submit.mock.calls[0][0].text).toBe('continued question')
+  expect(submit.mock.calls[1][0].text).toBe('next question')
+  expect(captured[0].filter(value => value === 1)).toHaveLength(640)
+  expect(captured[1].filter(value => value === 1)).toHaveLength(320)
   await controller.close()
 })

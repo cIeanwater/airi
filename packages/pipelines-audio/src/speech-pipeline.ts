@@ -1,6 +1,7 @@
 import type { Eventa } from '@moeru/eventa'
 
 import type { SpeechPipelineEventName } from './eventa'
+import type { StreamingControlEmotionPayload } from './llm-streaming-control/payloads'
 import type {
   IntentHandle,
   IntentOptions,
@@ -16,6 +17,8 @@ import type {
 import { createContext } from '@moeru/eventa'
 
 import { speechPipelineEventMap } from './eventa'
+import { tokenAct } from './llm-streaming-control/parsers/act'
+import { normalizeActPayload } from './llm-streaming-control/payloads'
 import { createPriorityResolver } from './priority'
 import { createTtsSegmentStream } from './processors/tts-chunker'
 import { createPushStream } from './stream'
@@ -67,6 +70,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
   const priorityResolver = options.priority ?? createPriorityResolver()
   const segmenter = options.segmenter ?? createTtsSegmentStream
   const ttsMaxConcurrent = Math.max(1, options.ttsMaxConcurrent ?? 4)
+  const actParser = tokenAct()
   const context = createContext()
   const timeline = createTimeline()
 
@@ -135,6 +139,9 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
     const inFlightTasks = new Set<Promise<void>>()
     let nextRequestSequence = 0
     let nextSequenceToSchedule = 0
+    // This intent owns synthesis emotion. Playback dispatch remains on its
+    // timeline, so concurrent generation cannot read emotion from another clip.
+    let currentEmotion: StreamingControlEmotionPayload | undefined
 
     function enqueueSpecial(segment: TextSegment) {
       timeline.enqueue({
@@ -272,6 +279,17 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
 
         context.emit(speechPipelineEventMap.onSegment, value)
 
+        const emotion = currentEmotion ? Object.freeze({ ...currentEmotion }) : undefined
+        if (value.special && actParser.match(value.special)) {
+          const action = actParser.parse(value.special)
+          const nextEmotion = action ? normalizeActPayload(action.payload).emotion : undefined
+          // A segment's special follows its text. Apply it only to later text,
+          // including when this segment contains no text. Motion-only ACT and
+          // invalid controls preserve the current synthesis emotion.
+          if (nextEmotion)
+            currentEmotion = nextEmotion
+        }
+
         if (value.text === '' && value.special) {
           enqueueSpecial(value)
           continue
@@ -285,6 +303,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
           sequence: nextRequestSequence++,
           text: value.text,
           special: value.special,
+          ...(emotion && { emotion }),
           reason: value.reason,
           priority: intent.priority,
           createdAt: Date.now(),

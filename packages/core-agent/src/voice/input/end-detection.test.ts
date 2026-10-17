@@ -9,6 +9,31 @@ import { VoiceController } from '../../index'
 import { keepOpen, pcmSource } from '../../testing/audio'
 
 describe('voiceController end detection', () => {
+  it('counts accepted speech frames once across overlapping activity and rejects gaps', async () => {
+    const source = createPushStream<PcmBlock>()
+    const audio = new AudioInput(pcmSource(source.stream))
+    const output = createPushStream<TranscriptionEvent>()
+    const controller = new VoiceController({ audio, transcriber: () => ({ transcribe: () => output.stream }) })
+    const attempt = controller.beginInput({ sessionId: 'alice', interruptTurns: [], start: { kind: 'after-silence' } })
+    source.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 24 }, sampleRate: 1000, channels: [new Float32Array(24)] })
+    await expect.poll(() => attempt.state.phase).toBe('capturing')
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 0, endFrame: 6 }, speech: true })).toBe(true)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 0, endFrame: 6 }, speech: true })).toBe(false)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 4, endFrame: 8 }, speech: true })).toBe(true)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 8, endFrame: 16 }, speech: false })).toBe(true)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 18, endFrame: 20 }, speech: true })).toBe(false)
+    expect(attempt.noteActivity({ range: { sourceId: 'mic', startFrame: 16, endFrame: 20 }, speech: true })).toBe(true)
+    const frames: number[] = []
+    attempt.detectEnd({ windowMs: 4, hopMs: 4, activity: 'ordered' }, async (evidence) => {
+      frames.push(evidence.speechFrames)
+      return 'continue'
+    })
+    source.write({ range: { sourceId: 'mic', startFrame: 24, endFrame: 28 }, sampleRate: 1000, channels: [new Float32Array(4)] })
+    await expect.poll(() => frames.length).toBeGreaterThan(0)
+    expect(frames.every(count => count === 12)).toBe(true)
+    await controller.close()
+  })
+
   it('accepts onset activity when capture includes earlier padding', async () => {
     const source = createPushStream<PcmBlock>()
     const audio = new AudioInput(pcmSource(source.stream), { historyMs: 10 })

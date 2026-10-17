@@ -1,7 +1,9 @@
 import type { PreTrainedModel } from '@huggingface/transformers'
 import type { AudioWindow } from '@proj-airi/pipelines-audio'
 
-import { AutoModel, PretrainedConfig, Tensor } from '@huggingface/transformers'
+import { Tensor } from '@huggingface/transformers'
+
+import { loadVadModel } from './model'
 
 /** Owns model inference state. Speech admission and recording remain outside the model. */
 export class SileroVad {
@@ -12,7 +14,7 @@ export class SileroVad {
   private closed = false
 
   constructor() {
-    this.model = AutoModel.from_pretrained('onnx-community/silero-vad', { config: new PretrainedConfig({ model_type: 'custom' }), dtype: 'fp32' })
+    this.model = loadVadModel()
     void this.model.catch(() => {})
   }
 
