@@ -15,4 +15,5 @@ if errorlevel 1 (
   exit /b 1
 )
 echo Humanning is running. Closing this window keeps it running.
-timeout /t 4 >nul
+timeout /t 4 >nul 2>nul
+exit /b 0

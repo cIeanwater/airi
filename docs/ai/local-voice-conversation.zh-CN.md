@@ -2,7 +2,7 @@
 
 ## 当前语音方案
 
-更新日期：2026-10-17。
+更新日期：2026-10-18。
 
 桌面当前使用 Zipformer small 中英双语流式转写、Smart Turn v3.2 判断说话是否结束、Qwen3.5-2B BF16 回复、MOSS-TTS-Nano ONNX 合成。
 默认女声音色为 Xiaoyu，另可选 Yuewen、Lingyu。语音组件使用 CPU，对话模型保持原有 BF16 GPU 推理。
@@ -24,6 +24,13 @@ Nano 根据文字与标点产生语调，不支持自然语言情绪指令；ACT
 本机双击仓库根目录 `Start-Humanning.cmd` 即可启动。入口会复用健康服务，保留原桌面 profile 和聊天数据。
 当前仍是源码运行，需要已有 Node/pnpm 依赖、Python 环境与权重；不是独立安装包。
 
+桌面入口优先使用父目录 `.tools/node-v26.7.0-win-x64/node.exe`，其次查找系统 PATH 中的 Node。
+启动器直接运行 `electron-vite.js`，并为桌面子进程加入该 Node 目录。
+因此，双击入口不要求 Windows 全局 PATH 中已有 Node，也不依赖调试终端的环境。
+自备 Node 可用 `--node-path D:\path\to\node.exe` 指定，或设置 `HUMANNING_NODE`；显式指定时优先使用该路径。
+运行时须满足 `electron-vite` 的版本要求：Node 20.19 至 20.x，或 Node 22.12 及以上。
+缺失或不可用时，入口会在启动模型前报错。
+
 准备好各服务的运行环境和权重后，在仓库根目录运行：
 
 ```powershell
@@ -33,9 +40,11 @@ python scripts/start-local-voice.py
 
 该入口使用本机已有的独立环境，不执行安装或下载。
 它后台启动服务和原桌面 profile，并复用通过健康检查的已有服务。
-`--check` 只检查文件路径。服务启动时另行校验模型权重。
+`--check` 检查文件路径与桌面 Node 版本。服务启动时另行校验模型权重。
 其他目录通过 `--tools-dir` 与 `--models-dir` 指定。
-只启动服务时使用 `--services-only`。
+只启动服务时使用 `--services-only`，此模式不需要 Node 或桌面依赖。
+
+2026-10-18 的启动环境回归与复测结果见[启动验收](validation/2026-10-18-windows-launcher.zh-CN.md)。
 
 默认开启本地模式，不需要账号登录。账号、云同步、官方托管 Provider 和产品遥测入口已关闭。
 切换模型时要同时保存当前角色卡的语音设置和全局设置。本机已完成此项。
