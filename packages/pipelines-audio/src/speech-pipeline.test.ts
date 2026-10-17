@@ -82,6 +82,98 @@ function createPlaybackSpy(options?: { autoEnd?: boolean }) {
 }
 
 describe('createSpeechPipeline', () => {
+  // ROOT CAUSE:
+  // ACT controls reach the stage on the playback timeline, after later TTS
+  // requests can start. Each synthesis request now carries its own preceding
+  // ACT emotion instead of reading the stage's current expression.
+  it('captures each ACT emotion before synthesis without changing earlier or trailing segments', async () => {
+    const { playback } = createPlaybackSpy()
+    const requests: TtsRequest[] = []
+    const generated = deferred<string>()
+    const pipeline = createSpeechPipeline<string>({
+      ttsMaxConcurrent: 5,
+      playback,
+      async tts(request) {
+        requests.push(request)
+        return generated.promise
+      },
+    })
+    const finished = new Promise<void>((resolve) => {
+      pipeline.on('onIntentEnd', () => resolve())
+    })
+
+    const intent = pipeline.openIntent()
+    intent.writeSpecial('<|ACT {"emotion":{"name":"happy","intensity":0.6}}|>')
+    intent.writeLiteral('第一段。')
+    intent.writeLiteral('转折')
+    intent.writeSpecial('<|ACT {"emotion":{"name":"sad","intensity":0.8}}|>')
+    intent.writeLiteral('第二段。')
+    intent.writeSpecial('<|ACT {"motion":"Flick"}|>')
+    intent.writeLiteral('第三段。')
+    intent.writeSpecial('<|ACT {"emotion":{"name":"neutral","intensity":0}}|>')
+    intent.writeLiteral('尾声。')
+    intent.end()
+
+    try {
+      await vi.waitFor(() => expect(requests).toHaveLength(5))
+      expect(requests).toMatchObject([
+        { text: '第一段。', emotion: { name: 'happy', intensity: 0.6 } },
+        { text: '转折', emotion: { name: 'happy', intensity: 0.6 } },
+        { text: '第二段。', emotion: { name: 'sad', intensity: 0.8 } },
+        { text: '第三段。', emotion: { name: 'sad', intensity: 0.8 } },
+        { text: '尾声。', emotion: { name: 'neutral', intensity: 0 } },
+      ])
+    }
+    finally {
+      generated.resolve('audio')
+      await finished
+    }
+  })
+
+  it('keeps synthesis emotion through invalid and unrelated controls and resets it for another intent', async () => {
+    const { playback } = createPlaybackSpy()
+    const requests: TtsRequest[] = []
+    const pipeline = createSpeechPipeline<string>({
+      playback,
+      async tts(request) {
+        requests.push(request)
+        return request.text
+      },
+    })
+    let resolveFinished!: () => void
+    pipeline.on('onIntentEnd', () => resolveFinished())
+
+    const firstFinished = new Promise<void>((resolve) => {
+      resolveFinished = resolve
+    })
+    const first = pipeline.openIntent()
+    first.writeSpecial('<|ACT {"emotion":"curious"}|>')
+    first.writeLiteral('开头。')
+    first.writeSpecial('<|ACT invalid json|>')
+    first.writeSpecial('<|ACT {"emotion":"unsupported"}|>')
+    first.writeSpecial('<|DELAY 0.2|>')
+    first.writeSpecial('<|CALL ["plugin.action"]|>')
+    first.writeLiteral('继续。')
+    first.end()
+    await firstFinished
+
+    expect(requests).toMatchObject([
+      { text: '开头。', emotion: { name: 'curious', intensity: 1 } },
+      { text: '继续。', emotion: { name: 'curious', intensity: 1 } },
+    ])
+
+    const secondFinished = new Promise<void>((resolve) => {
+      resolveFinished = resolve
+    })
+    const second = pipeline.openIntent()
+    second.writeLiteral('新的回合。')
+    second.end()
+    await secondFinished
+
+    expect(requests[2]).not.toHaveProperty('emotion')
+    expect(requests[2].text).toBe('新的回合。')
+  })
+
   it('preserves playback order when TTS completes out of order', async () => {
     const { scheduled, playback } = createPlaybackSpy()
 

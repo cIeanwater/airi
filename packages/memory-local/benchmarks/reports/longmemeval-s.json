@@ -1,0 +1,1305 @@
+{
+  "dataset": {
+    "repository": "xiaowu0162/longmemeval-cleaned",
+    "revision": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+    "split": "s",
+    "filename": "longmemeval_s_cleaned.json",
+    "sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "license": "MIT (Hugging Face dataset card)"
+  },
+  "scope": "Retrieval evaluation with distractor sessions",
+  "evaluatedAt": "2026-08-31T15:50:09.877Z",
+  "host": {
+    "node": "v26.7.0",
+    "platform": "win32",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "totalMemoryBytes": 33409261568
+  },
+  "implementation": {
+    "sourceSha256": {
+      "../src/index.ts": "3286783067b0fc4bb81ea3be7a7ec4743d77e9406b6281a1624b4164c7b41b3e",
+      "../src/memory.ts": "76d3475fff589c7d2c4b7bce788475332238048e1a194de4fff599b5b6487ada",
+      "../src/schema.ts": "ee0321c463989b620d10260d1d9f85103727ba2787c69028250a4330dfbf3748",
+      "../src/text.ts": "3a26566c0200ac9cfdfbdc9e025ed592cc53eb7c252ae27d58807cbb2f5bd631",
+      "../src/types.ts": "181a85baa9a04d22740f1086884844c4acb99b7d747fb78cc04f20dcf097eef3",
+      "./run.ts": "f411fee439e11699eeb64e71fd3334534e07f01b1c94d2ce3a041ffc91d70fb0"
+    },
+    "miniSearchVersion": "7.2.0"
+  },
+  "selection": {
+    "totalDatasetQuestions": 500,
+    "offset": 0,
+    "requestedLimit": 500,
+    "selectedQuestions": 500,
+    "scoredQuestions": 470,
+    "excludedAbstentionQuestions": 30
+  },
+  "configuration": {
+    "profile": "research",
+    "chunk": {
+      "maxCharacters": 1200,
+      "overlap": 120
+    },
+    "search": {
+      "limit": 20,
+      "maxCharacters": 24000,
+      "halfLifeDays": 0
+    },
+    "cutoffs": [
+      1,
+      5,
+      10,
+      20
+    ],
+    "embeddings": false,
+    "storage": "none",
+    "historyRoles": [
+      "user",
+      "assistant"
+    ],
+    "diversityAblation": [
+      0,
+      0.15
+    ]
+  },
+  "methodology": {
+    "unit": "First k chunks, without expansion to complete sessions",
+    "recall": "Macro mean of unique supporting source IDs retrieved / all supporting source IDs",
+    "hit": "Fraction of questions with at least one supporting source ID retrieved",
+    "complete": "Fraction of questions with all supporting source IDs retrieved",
+    "mrr": "Macro mean of reciprocal rank of the first supporting chunk, truncated at k",
+    "turnCaveat": "A hit identifies a labeled source turn. A split chunk can omit the answer span within that turn.",
+    "sessionCaveat": "A hit identifies a supporting session. It does not prove that the returned chunk contains the answer.",
+    "timing": "One in-memory query per method per question after ingestion. Method order alternates. No model, storage, or network time.",
+    "formatting": "The app profile scores only records present after the public context formatter. Formatting time is reported separately. Benchmark source IDs differ from application IDs.",
+    "abstention": "Excluded from evidence recall. No answer generation or calibrated abstention is measured."
+  },
+  "resources": {
+    "wallSeconds": 34.7327577,
+    "peakObservedRssBytes": 1743970304,
+    "ingestMs": {
+      "p50": 52.421800000000076,
+      "p95": 59.58979999999792
+    },
+    "indexedChunks": {
+      "min": 690,
+      "mean": 754.2595744680851,
+      "max": 851
+    },
+    "indexedCharactersMean": 524814.659574468
+  },
+  "overall": {
+    "lexical": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 0.19859999999971478,
+        "p95": 0.6009999999987485
+      },
+      "formatMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "at": {
+        "1": {
+          "sessionRecall": 0.5427304964539007,
+          "sessionHit": 0.8382978723404255,
+          "sessionComplete": 0.2957446808510638,
+          "sessionMrr": 0.8382978723404255,
+          "turnRecall": 0.3077659574468085,
+          "turnHit": 0.44893617021276594,
+          "turnComplete": 0.1829787234042553,
+          "turnMrr": 0.44893617021276594,
+          "characters": 636.8851063829787
+        },
+        "5": {
+          "sessionRecall": 0.8238652482269503,
+          "sessionHit": 0.9340425531914893,
+          "sessionComplete": 0.7085106382978723,
+          "sessionMrr": 0.8722340425531915,
+          "turnRecall": 0.6019148936170211,
+          "turnHit": 0.7319148936170212,
+          "turnComplete": 0.4829787234042553,
+          "turnMrr": 0.5593971631205674,
+          "characters": 3740.01914893617
+        },
+        "10": {
+          "sessionRecall": 0.886808510638298,
+          "sessionHit": 0.9595744680851064,
+          "sessionComplete": 0.7957446808510639,
+          "sessionMrr": 0.8758324890239783,
+          "turnRecall": 0.7190070921985815,
+          "turnHit": 0.8212765957446808,
+          "turnComplete": 0.625531914893617,
+          "turnMrr": 0.5716354272205337,
+          "characters": 7800.597872340426
+        },
+        "20": {
+          "sessionRecall": 0.9449290780141845,
+          "sessionHit": 0.9851063829787234,
+          "sessionComplete": 0.8872340425531915,
+          "sessionMrr": 0.8776096303223961,
+          "turnRecall": 0.8047163120567375,
+          "turnHit": 0.8914893617021277,
+          "turnComplete": 0.723404255319149,
+          "turnMrr": 0.5765367558558885,
+          "characters": 16093.678723404255
+        }
+      }
+    },
+    "lexical-diversity": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 21.335699999999633,
+        "p95": 27.236000000000786
+      },
+      "formatMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "at": {
+        "1": {
+          "sessionRecall": 0.5427304964539007,
+          "sessionHit": 0.8382978723404255,
+          "sessionComplete": 0.2957446808510638,
+          "sessionMrr": 0.8382978723404255,
+          "turnRecall": 0.3077659574468085,
+          "turnHit": 0.44893617021276594,
+          "turnComplete": 0.1829787234042553,
+          "turnMrr": 0.44893617021276594,
+          "characters": 636.8851063829787
+        },
+        "5": {
+          "sessionRecall": 0.8245744680851063,
+          "sessionHit": 0.9404255319148936,
+          "sessionComplete": 0.7085106382978723,
+          "sessionMrr": 0.8759574468085105,
+          "turnRecall": 0.5775531914893616,
+          "turnHit": 0.723404255319149,
+          "turnComplete": 0.44680851063829785,
+          "turnMrr": 0.5527659574468088,
+          "characters": 3803.031914893617
+        },
+        "10": {
+          "sessionRecall": 0.8873404255319151,
+          "sessionHit": 0.9595744680851064,
+          "sessionComplete": 0.7957446808510639,
+          "sessionMrr": 0.8785663627152988,
+          "turnRecall": 0.710531914893617,
+          "turnHit": 0.8170212765957446,
+          "turnComplete": 0.6127659574468085,
+          "turnMrr": 0.5656138129010472,
+          "characters": 7831.1765957446805
+        },
+        "20": {
+          "sessionRecall": 0.9452836879432625,
+          "sessionHit": 0.9851063829787234,
+          "sessionComplete": 0.8872340425531915,
+          "sessionMrr": 0.8804255555319382,
+          "turnRecall": 0.8012765957446808,
+          "turnHit": 0.8914893617021277,
+          "turnComplete": 0.7191489361702128,
+          "turnMrr": 0.5708915831202739,
+          "characters": 16083.876595744681
+        }
+      }
+    },
+    "recency": {
+      "queryCount": 470,
+      "searchMs": {
+        "p50": 0.13689999999769498,
+        "p95": 0.2124999999978172
+      },
+      "formatMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "at": {
+        "1": {
+          "sessionRecall": 0.027304964539007093,
+          "sessionHit": 0.03829787234042553,
+          "sessionComplete": 0.019148936170212766,
+          "sessionMrr": 0.03829787234042553,
+          "turnRecall": 0,
+          "turnHit": 0,
+          "turnComplete": 0,
+          "turnMrr": 0,
+          "characters": 614.9851063829788
+        },
+        "5": {
+          "sessionRecall": 0.028368794326241138,
+          "sessionHit": 0.04042553191489362,
+          "sessionComplete": 0.019148936170212766,
+          "sessionMrr": 0.03900709219858157,
+          "turnRecall": 0.002127659574468085,
+          "turnHit": 0.002127659574468085,
+          "turnComplete": 0.002127659574468085,
+          "turnMrr": 0.00042553191489361707,
+          "characters": 3329.795744680851
+        },
+        "10": {
+          "sessionRecall": 0.03049645390070922,
+          "sessionHit": 0.0425531914893617,
+          "sessionComplete": 0.02127659574468085,
+          "sessionMrr": 0.03927304964539008,
+          "turnRecall": 0.006808510638297873,
+          "turnHit": 0.00851063829787234,
+          "turnComplete": 0.006382978723404255,
+          "turnMrr": 0.0011170212765957447,
+          "characters": 6724.227659574468
+        },
+        "20": {
+          "sessionRecall": 0.04599290780141844,
+          "sessionHit": 0.07446808510638298,
+          "sessionComplete": 0.02553191489361702,
+          "sessionMrr": 0.04122134409771918,
+          "turnRecall": 0.024787234042553192,
+          "turnHit": 0.03404255319148936,
+          "turnComplete": 0.01702127659574468,
+          "turnMrr": 0.0026882185527037643,
+          "characters": 13816.842553191489
+        }
+      }
+    }
+  },
+  "byQuestionType": {
+    "knowledge-update": {
+      "lexical": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 0.1709000000009837,
+          "p95": 0.35610000000087894
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.4861111111111111,
+            "sessionHit": 0.9722222222222222,
+            "sessionComplete": 0,
+            "sessionMrr": 0.9722222222222222,
+            "turnRecall": 0.2638888888888889,
+            "turnHit": 0.5277777777777778,
+            "turnComplete": 0,
+            "turnMrr": 0.5277777777777778,
+            "characters": 458.2638888888889
+          },
+          "5": {
+            "sessionRecall": 0.9236111111111112,
+            "sessionHit": 1,
+            "sessionComplete": 0.8472222222222222,
+            "sessionMrr": 0.9791666666666666,
+            "turnRecall": 0.7245370370370371,
+            "turnHit": 0.875,
+            "turnComplete": 0.5694444444444444,
+            "turnMrr": 0.6645833333333333,
+            "characters": 3383.2083333333335
+          },
+          "10": {
+            "sessionRecall": 0.9722222222222222,
+            "sessionHit": 1,
+            "sessionComplete": 0.9444444444444444,
+            "sessionMrr": 0.9791666666666666,
+            "turnRecall": 0.8541666666666666,
+            "turnHit": 0.9166666666666666,
+            "turnComplete": 0.7916666666666666,
+            "turnMrr": 0.6703703703703704,
+            "characters": 7606.805555555556
+          },
+          "20": {
+            "sessionRecall": 0.9861111111111112,
+            "sessionHit": 1,
+            "sessionComplete": 0.9722222222222222,
+            "sessionMrr": 0.9791666666666666,
+            "turnRecall": 0.9212962962962964,
+            "turnHit": 0.9861111111111112,
+            "turnComplete": 0.8611111111111112,
+            "turnMrr": 0.6747243040828567,
+            "characters": 16533.25
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 19.495200000001205,
+          "p95": 26.988799999999173
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.4861111111111111,
+            "sessionHit": 0.9722222222222222,
+            "sessionComplete": 0,
+            "sessionMrr": 0.9722222222222222,
+            "turnRecall": 0.2638888888888889,
+            "turnHit": 0.5277777777777778,
+            "turnComplete": 0,
+            "turnMrr": 0.5277777777777778,
+            "characters": 458.2638888888889
+          },
+          "5": {
+            "sessionRecall": 0.9236111111111112,
+            "sessionHit": 1,
+            "sessionComplete": 0.8472222222222222,
+            "sessionMrr": 0.9814814814814814,
+            "turnRecall": 0.675925925925926,
+            "turnHit": 0.8333333333333334,
+            "turnComplete": 0.5138888888888888,
+            "turnMrr": 0.6351851851851854,
+            "characters": 3482.597222222222
+          },
+          "10": {
+            "sessionRecall": 0.9722222222222222,
+            "sessionHit": 1,
+            "sessionComplete": 0.9444444444444444,
+            "sessionMrr": 0.9814814814814814,
+            "turnRecall": 0.8472222222222222,
+            "turnHit": 0.9166666666666666,
+            "turnComplete": 0.7777777777777778,
+            "turnMrr": 0.6471450617283953,
+            "characters": 7652.375
+          },
+          "20": {
+            "sessionRecall": 0.9861111111111112,
+            "sessionHit": 1,
+            "sessionComplete": 0.9722222222222222,
+            "sessionMrr": 0.9814814814814814,
+            "turnRecall": 0.914351851851852,
+            "turnHit": 0.9861111111111112,
+            "turnComplete": 0.8472222222222222,
+            "turnMrr": 0.6516014064195181,
+            "characters": 16489.069444444445
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 72,
+        "searchMs": {
+          "p50": 0.13220000000001164,
+          "p95": 0.17879999999786378
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 619.0833333333334
+          },
+          "5": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 3241.5833333333335
+          },
+          "10": {
+            "sessionRecall": 0.027777777777777776,
+            "sessionHit": 0.05555555555555555,
+            "sessionComplete": 0,
+            "sessionMrr": 0.05555555555555555,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 6529.111111111111
+          },
+          "20": {
+            "sessionRecall": 0.041666666666666664,
+            "sessionHit": 0.08333333333333333,
+            "sessionComplete": 0,
+            "sessionMrr": 0.0572406045751634,
+            "turnRecall": 0.013888888888888888,
+            "turnHit": 0.027777777777777776,
+            "turnComplete": 0,
+            "turnMrr": 0.001994301994301994,
+            "characters": 13661.527777777777
+          }
+        }
+      }
+    },
+    "multi-session": {
+      "lexical": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 0.17349999999896681,
+          "p95": 0.36229999999977736
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.33842975206611575,
+            "sessionHit": 0.7933884297520661,
+            "sessionComplete": 0,
+            "sessionMrr": 0.7933884297520661,
+            "turnRecall": 0.1293388429752066,
+            "turnHit": 0.2975206611570248,
+            "turnComplete": 0,
+            "turnMrr": 0.2975206611570248,
+            "characters": 730.3801652892562
+          },
+          "5": {
+            "sessionRecall": 0.7143250688705235,
+            "sessionHit": 0.9421487603305785,
+            "sessionComplete": 0.4628099173553719,
+            "sessionMrr": 0.8454545454545455,
+            "turnRecall": 0.38953168044077136,
+            "turnHit": 0.6363636363636364,
+            "turnComplete": 0.1652892561983471,
+            "turnMrr": 0.41198347107438027,
+            "characters": 4046.0165289256197
+          },
+          "10": {
+            "sessionRecall": 0.8192837465564737,
+            "sessionHit": 0.9752066115702479,
+            "sessionComplete": 0.6115702479338843,
+            "sessionMrr": 0.850308277581005,
+            "turnRecall": 0.5520661157024793,
+            "turnHit": 0.7851239669421488,
+            "turnComplete": 0.3305785123966942,
+            "turnMrr": 0.4329266692903057,
+            "characters": 8240.88429752066
+          },
+          "20": {
+            "sessionRecall": 0.8995867768595041,
+            "sessionHit": 0.9834710743801653,
+            "sessionComplete": 0.768595041322314,
+            "sessionMrr": 0.8508592417683328,
+            "turnRecall": 0.6654269972451791,
+            "turnHit": 0.8760330578512396,
+            "turnComplete": 0.4793388429752066,
+            "turnMrr": 0.43943609528806427,
+            "characters": 16496.272727272728
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 20.394399999999223,
+          "p95": 26.735000000000582
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.33842975206611575,
+            "sessionHit": 0.7933884297520661,
+            "sessionComplete": 0,
+            "sessionMrr": 0.7933884297520661,
+            "turnRecall": 0.1293388429752066,
+            "turnHit": 0.2975206611570248,
+            "turnComplete": 0,
+            "turnMrr": 0.2975206611570248,
+            "characters": 730.3801652892562
+          },
+          "5": {
+            "sessionRecall": 0.706060606060606,
+            "sessionHit": 0.9504132231404959,
+            "sessionComplete": 0.45454545454545453,
+            "sessionMrr": 0.8528925619834711,
+            "turnRecall": 0.3502754820936639,
+            "turnHit": 0.6198347107438017,
+            "turnComplete": 0.11570247933884298,
+            "turnMrr": 0.4183195592286503,
+            "characters": 4119.9504132231405
+          },
+          "10": {
+            "sessionRecall": 0.8213498622589531,
+            "sessionHit": 0.9752066115702479,
+            "sessionComplete": 0.6115702479338843,
+            "sessionMrr": 0.8565656565656565,
+            "turnRecall": 0.5384297520661158,
+            "turnHit": 0.768595041322314,
+            "turnComplete": 0.32231404958677684,
+            "turnMrr": 0.43969893742621036,
+            "characters": 8268.371900826447
+          },
+          "20": {
+            "sessionRecall": 0.8995867768595041,
+            "sessionHit": 0.9834710743801653,
+            "sessionComplete": 0.768595041322314,
+            "sessionMrr": 0.8571559753377936,
+            "turnRecall": 0.6716253443526171,
+            "turnHit": 0.8842975206611571,
+            "turnComplete": 0.48760330578512395,
+            "turnMrr": 0.4480751252858054,
+            "characters": 16451.495867768594
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 121,
+        "searchMs": {
+          "p50": 0.11449999999967986,
+          "p95": 0.16809999999986758
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 661.1818181818181
+          },
+          "5": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 3424.305785123967
+          },
+          "10": {
+            "sessionRecall": 0.008953168044077135,
+            "sessionHit": 0.024793388429752067,
+            "sessionComplete": 0,
+            "sessionMrr": 0.024793388429752067,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 6952.727272727273
+          },
+          "20": {
+            "sessionRecall": 0.031955922865013774,
+            "sessionHit": 0.08264462809917356,
+            "sessionComplete": 0,
+            "sessionMrr": 0.028394194484310388,
+            "turnRecall": 0.010330578512396695,
+            "turnHit": 0.024793388429752067,
+            "turnComplete": 0,
+            "turnMrr": 0.0014844273217478959,
+            "characters": 14033.86776859504
+          }
+        }
+      }
+    },
+    "single-session-assistant": {
+      "lexical": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 0.4276000000027125,
+          "p95": 1.1146000000007916
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.7142857142857143,
+            "turnHit": 0.7142857142857143,
+            "turnComplete": 0.7142857142857143,
+            "turnMrr": 0.7142857142857143,
+            "characters": 887.5535714285714
+          },
+          "5": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.875,
+            "turnHit": 0.875,
+            "turnComplete": 0.875,
+            "turnMrr": 0.7916666666666667,
+            "characters": 3968.2678571428573
+          },
+          "10": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.9285714285714286,
+            "turnHit": 0.9285714285714286,
+            "turnComplete": 0.9285714285714286,
+            "turnMrr": 0.7991780045351472,
+            "characters": 7872.357142857143
+          },
+          "20": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.9285714285714286,
+            "turnHit": 0.9285714285714286,
+            "turnComplete": 0.9285714285714286,
+            "turnMrr": 0.7991780045351472,
+            "characters": 15818
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 24.45639999999912,
+          "p95": 29.444600000002538
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.7142857142857143,
+            "turnHit": 0.7142857142857143,
+            "turnComplete": 0.7142857142857143,
+            "turnMrr": 0.7142857142857143,
+            "characters": 887.5535714285714
+          },
+          "5": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.875,
+            "turnHit": 0.875,
+            "turnComplete": 0.875,
+            "turnMrr": 0.7812500000000001,
+            "characters": 4030.464285714286
+          },
+          "10": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.9107142857142857,
+            "turnHit": 0.9107142857142857,
+            "turnComplete": 0.9107142857142857,
+            "turnMrr": 0.7855867346938776,
+            "characters": 7903.839285714285
+          },
+          "20": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 1,
+            "turnRecall": 0.9285714285714286,
+            "turnHit": 0.9285714285714286,
+            "turnComplete": 0.9285714285714286,
+            "turnMrr": 0.7869603610675041,
+            "characters": 15865.875
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 56,
+        "searchMs": {
+          "p50": 0.14549999999871943,
+          "p95": 0.1978000000017346
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 518.7142857142857
+          },
+          "5": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 3334.3571428571427
+          },
+          "10": {
+            "sessionRecall": 0.017857142857142856,
+            "sessionHit": 0.017857142857142856,
+            "sessionComplete": 0.017857142857142856,
+            "sessionMrr": 0.017857142857142856,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 6733.803571428572
+          },
+          "20": {
+            "sessionRecall": 0.03571428571428571,
+            "sessionHit": 0.03571428571428571,
+            "sessionComplete": 0.03571428571428571,
+            "sessionMrr": 0.019047619047619046,
+            "turnRecall": 0.03571428571428571,
+            "turnHit": 0.03571428571428571,
+            "turnComplete": 0.03571428571428571,
+            "turnMrr": 0.002313475997686524,
+            "characters": 13770.357142857143
+          }
+        }
+      }
+    },
+    "single-session-preference": {
+      "lexical": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 0.3041000000011991,
+          "p95": 0.943199999999706
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.3,
+            "sessionHit": 0.3,
+            "sessionComplete": 0.3,
+            "sessionMrr": 0.3,
+            "turnRecall": 0.05,
+            "turnHit": 0.06666666666666667,
+            "turnComplete": 0.03333333333333333,
+            "turnMrr": 0.06666666666666667,
+            "characters": 619.2
+          },
+          "5": {
+            "sessionRecall": 0.5666666666666667,
+            "sessionHit": 0.5666666666666667,
+            "sessionComplete": 0.5666666666666667,
+            "sessionMrr": 0.3944444444444445,
+            "turnRecall": 0.17777777777777776,
+            "turnHit": 0.23333333333333334,
+            "turnComplete": 0.13333333333333333,
+            "turnMrr": 0.10944444444444444,
+            "characters": 3069.766666666667
+          },
+          "10": {
+            "sessionRecall": 0.6666666666666666,
+            "sessionHit": 0.6666666666666666,
+            "sessionComplete": 0.6666666666666666,
+            "sessionMrr": 0.4097222222222222,
+            "turnRecall": 0.3333333333333333,
+            "turnHit": 0.4,
+            "turnComplete": 0.26666666666666666,
+            "turnMrr": 0.13365079365079366,
+            "characters": 6475.966666666666
+          },
+          "20": {
+            "sessionRecall": 0.9,
+            "sessionHit": 0.9,
+            "sessionComplete": 0.9,
+            "sessionMrr": 0.42513888888888884,
+            "turnRecall": 0.5777777777777777,
+            "turnHit": 0.6333333333333333,
+            "turnComplete": 0.5,
+            "turnMrr": 0.1476037851037851,
+            "characters": 13572
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 20.818999999999505,
+          "p95": 26.162899999999354
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.3,
+            "sessionHit": 0.3,
+            "sessionComplete": 0.3,
+            "sessionMrr": 0.3,
+            "turnRecall": 0.05,
+            "turnHit": 0.06666666666666667,
+            "turnComplete": 0.03333333333333333,
+            "turnMrr": 0.06666666666666667,
+            "characters": 619.2
+          },
+          "5": {
+            "sessionRecall": 0.6,
+            "sessionHit": 0.6,
+            "sessionComplete": 0.6,
+            "sessionMrr": 0.4022222222222222,
+            "turnRecall": 0.2111111111111111,
+            "turnHit": 0.26666666666666666,
+            "turnComplete": 0.16666666666666666,
+            "turnMrr": 0.12444444444444445,
+            "characters": 3123.6
+          },
+          "10": {
+            "sessionRecall": 0.6666666666666666,
+            "sessionHit": 0.6666666666666666,
+            "sessionComplete": 0.6666666666666666,
+            "sessionMrr": 0.4119444444444444,
+            "turnRecall": 0.3333333333333333,
+            "turnHit": 0.4,
+            "turnComplete": 0.26666666666666666,
+            "turnMrr": 0.14322751322751323,
+            "characters": 6531.133333333333
+          },
+          "20": {
+            "sessionRecall": 0.9,
+            "sessionHit": 0.9,
+            "sessionComplete": 0.9,
+            "sessionMrr": 0.4280964405964405,
+            "turnRecall": 0.5444444444444444,
+            "turnHit": 0.6,
+            "turnComplete": 0.4666666666666667,
+            "turnMrr": 0.15569094304388423,
+            "characters": 13618.133333333333
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 30,
+        "searchMs": {
+          "p50": 0.11549999999988358,
+          "p95": 0.1613999999990483
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 555.9666666666667
+          },
+          "5": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 3079.7
+          },
+          "10": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 6252.066666666667
+          },
+          "20": {
+            "sessionRecall": 0.1,
+            "sessionHit": 0.1,
+            "sessionComplete": 0.1,
+            "sessionMrr": 0.1,
+            "turnRecall": 0.03333333333333333,
+            "turnHit": 0.03333333333333333,
+            "turnComplete": 0.03333333333333333,
+            "turnMrr": 0.0016666666666666668,
+            "characters": 12703.833333333334
+          }
+        }
+      }
+    },
+    "single-session-user": {
+      "lexical": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 0.1867999999994936,
+          "p95": 0.6708000000003267
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.921875,
+            "sessionHit": 0.921875,
+            "sessionComplete": 0.921875,
+            "sessionMrr": 0.921875,
+            "turnRecall": 0.546875,
+            "turnHit": 0.5625,
+            "turnComplete": 0.53125,
+            "turnMrr": 0.5625,
+            "characters": 559.59375
+          },
+          "5": {
+            "sessionRecall": 0.984375,
+            "sessionHit": 0.984375,
+            "sessionComplete": 0.984375,
+            "sessionMrr": 0.9440104166666667,
+            "turnRecall": 0.859375,
+            "turnHit": 0.859375,
+            "turnComplete": 0.859375,
+            "turnMrr": 0.6901041666666666,
+            "characters": 3721.484375
+          },
+          "10": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9459635416666667,
+            "turnRecall": 0.921875,
+            "turnHit": 0.921875,
+            "turnComplete": 0.921875,
+            "turnMrr": 0.6982576884920636,
+            "characters": 7857.0625
+          },
+          "20": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9459635416666667,
+            "turnRecall": 0.96875,
+            "turnHit": 0.96875,
+            "turnComplete": 0.96875,
+            "turnMrr": 0.7020819891913642,
+            "characters": 15695.109375
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 14.045299999999997,
+          "p95": 27.655099999999948
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.921875,
+            "sessionHit": 0.921875,
+            "sessionComplete": 0.921875,
+            "sessionMrr": 0.921875,
+            "turnRecall": 0.546875,
+            "turnHit": 0.5625,
+            "turnComplete": 0.53125,
+            "turnMrr": 0.5625,
+            "characters": 559.59375
+          },
+          "5": {
+            "sessionRecall": 0.984375,
+            "sessionHit": 0.984375,
+            "sessionComplete": 0.984375,
+            "sessionMrr": 0.9479166666666666,
+            "turnRecall": 0.859375,
+            "turnHit": 0.859375,
+            "turnComplete": 0.859375,
+            "turnMrr": 0.6802083333333333,
+            "characters": 3725.96875
+          },
+          "10": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9498697916666666,
+            "turnRecall": 0.9375,
+            "turnHit": 0.9375,
+            "turnComplete": 0.9375,
+            "turnMrr": 0.6900979662698413,
+            "characters": 7828.734375
+          },
+          "20": {
+            "sessionRecall": 1,
+            "sessionHit": 1,
+            "sessionComplete": 1,
+            "sessionMrr": 0.9498697916666666,
+            "turnRecall": 0.96875,
+            "turnHit": 0.96875,
+            "turnComplete": 0.96875,
+            "turnMrr": 0.6923415560134311,
+            "characters": 15596.640625
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 64,
+        "searchMs": {
+          "p50": 0.181999999999789,
+          "p95": 0.24439999999958673
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.046875,
+            "sessionHit": 0.046875,
+            "sessionComplete": 0.046875,
+            "sessionMrr": 0.046875,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 616.171875
+          },
+          "5": {
+            "sessionRecall": 0.046875,
+            "sessionHit": 0.046875,
+            "sessionComplete": 0.046875,
+            "sessionMrr": 0.046875,
+            "turnRecall": 0.015625,
+            "turnHit": 0.015625,
+            "turnComplete": 0.015625,
+            "turnMrr": 0.003125,
+            "characters": 3506.125
+          },
+          "10": {
+            "sessionRecall": 0.0625,
+            "sessionHit": 0.0625,
+            "sessionComplete": 0.0625,
+            "sessionMrr": 0.048828125,
+            "turnRecall": 0.03125,
+            "turnHit": 0.03125,
+            "turnComplete": 0.03125,
+            "turnMrr": 0.005078125,
+            "characters": 6991.984375
+          },
+          "20": {
+            "sessionRecall": 0.0625,
+            "sessionHit": 0.0625,
+            "sessionComplete": 0.0625,
+            "sessionMrr": 0.048828125,
+            "turnRecall": 0.0625,
+            "turnHit": 0.0625,
+            "turnComplete": 0.0625,
+            "turnMrr": 0.006973805147058824,
+            "characters": 14218.46875
+          }
+        }
+      }
+    },
+    "temporal-reasoning": {
+      "lexical": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 0.1863999999986845,
+          "p95": 0.4363999999986845
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.4341207349081365,
+            "sessionHit": 0.8188976377952756,
+            "sessionComplete": 0.11811023622047244,
+            "sessionMrr": 0.8188976377952756,
+            "turnRecall": 0.2637795275590551,
+            "turnHit": 0.4645669291338583,
+            "turnComplete": 0.08661417322834646,
+            "turnMrr": 0.4645669291338583,
+            "characters": 581.6692913385826
+          },
+          "5": {
+            "sessionRecall": 0.7738845144356954,
+            "sessionHit": 0.9212598425196851,
+            "sessionComplete": 0.6299212598425197,
+            "sessionMrr": 0.8574803149606299,
+            "turnRecall": 0.5847769028871391,
+            "turnHit": 0.7322834645669292,
+            "turnComplete": 0.4566929133858268,
+            "turnMrr": 0.578215223097113,
+            "characters": 3717.787401574803
+          },
+          "10": {
+            "sessionRecall": 0.847769028871391,
+            "sessionHit": 0.952755905511811,
+            "sessionComplete": 0.7244094488188977,
+            "sessionMrr": 0.8615798025246845,
+            "turnRecall": 0.6979002624671914,
+            "turnHit": 0.8031496062992126,
+            "turnComplete": 0.6141732283464567,
+            "turnMrr": 0.5871328583927011,
+            "characters": 7743.787401574803
+          },
+          "20": {
+            "sessionRecall": 0.9233595800524934,
+            "sessionHit": 0.984251968503937,
+            "sessionComplete": 0.84251968503937,
+            "sessionMrr": 0.8639899579860211,
+            "turnRecall": 0.7876640419947507,
+            "turnHit": 0.8582677165354331,
+            "turnComplete": 0.7165354330708661,
+            "turnMrr": 0.5913781788434408,
+            "characters": 16378.984251968504
+          }
+        }
+      },
+      "lexical-diversity": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 22.305599999999686,
+          "p95": 26.759400000002643
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.4341207349081365,
+            "sessionHit": 0.8188976377952756,
+            "sessionComplete": 0.11811023622047244,
+            "sessionMrr": 0.8188976377952756,
+            "turnRecall": 0.2637795275590551,
+            "turnHit": 0.4645669291338583,
+            "turnComplete": 0.08661417322834646,
+            "turnMrr": 0.4645669291338583,
+            "characters": 581.6692913385826
+          },
+          "5": {
+            "sessionRecall": 0.776509186351706,
+            "sessionHit": 0.9291338582677166,
+            "sessionComplete": 0.6299212598425197,
+            "sessionMrr": 0.8590551181102363,
+            "turnRecall": 0.5517060367454069,
+            "turnHit": 0.7322834645669292,
+            "turnComplete": 0.3937007874015748,
+            "turnMrr": 0.5703412073490814,
+            "characters": 3781.7952755905512
+          },
+          "10": {
+            "sessionRecall": 0.847769028871391,
+            "sessionHit": 0.952755905511811,
+            "sessionComplete": 0.7244094488188977,
+            "sessionMrr": 0.8619297587801524,
+            "turnRecall": 0.6834645669291338,
+            "turnHit": 0.8031496062992126,
+            "turnComplete": 0.5826771653543307,
+            "turnMrr": 0.5794056992875891,
+            "characters": 7792.291338582677
+          },
+          "20": {
+            "sessionRecall": 0.9246719160104987,
+            "sessionHit": 0.984251968503937,
+            "sessionComplete": 0.84251968503937,
+            "sessionMrr": 0.864432374274894,
+            "turnRecall": 0.7808398950131236,
+            "turnHit": 0.8582677165354331,
+            "turnComplete": 0.7086614173228346,
+            "turnMrr": 0.5837502720376738,
+            "characters": 16428.03149606299
+          }
+        }
+      },
+      "recency": {
+        "queryCount": 127,
+        "searchMs": {
+          "p50": 0.15129999999771826,
+          "p95": 0.20520000000033178
+        },
+        "formatMs": {
+          "p50": 0,
+          "p95": 0
+        },
+        "at": {
+          "1": {
+            "sessionRecall": 0.021653543307086614,
+            "sessionHit": 0.031496062992125984,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.031496062992125984,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 624.4409448818898
+          },
+          "5": {
+            "sessionRecall": 0.025590551181102362,
+            "sessionHit": 0.03937007874015748,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.03412073490813648,
+            "turnRecall": 0,
+            "turnHit": 0,
+            "turnComplete": 0,
+            "turnMrr": 0,
+            "characters": 3257.968503937008
+          },
+          "10": {
+            "sessionRecall": 0.025590551181102362,
+            "sessionHit": 0.03937007874015748,
+            "sessionComplete": 0.015748031496062992,
+            "sessionMrr": 0.03412073490813648,
+            "turnRecall": 0.009448818897637795,
+            "turnHit": 0.015748031496062992,
+            "turnComplete": 0.007874015748031496,
+            "turnMrr": 0.0015748031496062994,
+            "characters": 6589.51968503937
+          },
+          "20": {
+            "sessionRecall": 0.045275590551181105,
+            "sessionHit": 0.07874015748031496,
+            "sessionComplete": 0.023622047244094488,
+            "sessionMrr": 0.03642003147439386,
+            "turnRecall": 0.01889763779527559,
+            "turnHit": 0.031496062992125984,
+            "turnComplete": 0.007874015748031496,
+            "turnMrr": 0.0024754258658844113,
+            "characters": 13779.141732283464
+          }
+        }
+      }
+    }
+  }
+}

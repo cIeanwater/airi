@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path'
+import { env } from 'node:process'
 
 import VueI18n from '@intlify/unplugin-vue-i18n/vite'
 import templateCompilerOptions from '@tresjs/core/template-compiler-options'
@@ -12,15 +13,25 @@ import Layouts from 'vite-plugin-vue-layouts'
 import VueMacros from 'vue-macros/vite'
 import VueRouter from 'vue-router/vite'
 
+import { paraformerBilingualZhEn, xAsrBilingualZhEnInt8, zipformerMultilingual } from '@proj-airi/provider-inference/sherpaw-transcription/models'
+import { kwsModel } from '@proj-airi/stage-ui/libs/voice/kws-model-info'
+import { transformersAssets } from '@proj-airi/stage-ui/vite/transformers-assets'
 import { Download } from '@proj-airi/unplugin-fetch'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
+import { resolveModelEndpoint, Sherpaw } from '@proj-airi/vite-plugin-sherpaw'
 import { defineConfig } from 'electron-vite'
 
 const stageUIAssetsRoot = resolve(join(import.meta.dirname, '..', '..', 'packages', 'stage-ui', 'src', 'assets'))
 const sharedCacheDir = resolve(join(import.meta.dirname, '..', '..', '.cache'))
+const sherpawModels = [paraformerBilingualZhEn, zipformerMultilingual, xAsrBilingualZhEnInt8]
+/** Main downloads remote Sherpaw models. It must use the endpoint that the renderer plugin uses. */
+const sherpawModelEndpoint = resolveModelEndpoint()
 
 export default defineConfig({
   main: {
+    define: {
+      'import.meta.env.SHERPAW_MODEL_ENDPOINT': JSON.stringify(sherpawModelEndpoint),
+    },
     build: {
       externalizeDeps: {
         include: [
@@ -28,7 +39,10 @@ export default defineConfig({
           // them into ESM and causing issues in runtime.
           'electron-click-drag-plugin',
           'uiohook-napi',
+          '@auv-js/cli',
+          '@auv-js/sdk',
           '@xsai-apple-speech/transcription-native',
+          '@xsai-apple-vision/vision-native',
         ],
       },
     },
@@ -96,6 +110,13 @@ export default defineConfig({
     // Thanks to [@Maqsyo](https://github.com/Maqsyo)
     // https://github.com/alex8088/electron-vite/issues/99#issuecomment-1862671727
     base: './',
+
+    experimental: {
+      renderBuiltUrl(filename, { type }) {
+        if (type === 'asset' && /^assets\/preload(?:\.js)?-[\w-]+\.(?:data|metadata)$/.test(filename))
+          return `airi-sherpaw://assets/${filename.slice('assets/'.length)}`
+      },
+    },
 
     build: {
       rolldownOptions: {
@@ -222,6 +243,7 @@ export default defineConfig({
               '**/settings/data/index.vue',
               '**/settings/models/index.vue',
               '**/settings/system/general.vue',
+              '**/settings/modules/home-assistant.vue',
               '**/settings/modules/mcp.vue',
               '**/devtools/index.vue',
               '**/settings/index.vue',
@@ -252,6 +274,16 @@ export default defineConfig({
         fullInstall: true,
       }),
 
+      transformersAssets(),
+      // Main downloads remote transcription models. Every build bundles the small wake word model,
+      // and development serves it from the cache, because main's model asset service does not serve it.
+      Sherpaw({
+        models: [...sherpawModels, kwsModel],
+        developmentModels: [kwsModel],
+        bundledModels: env.SHERPAW_BUNDLE_MODELS === 'true' ? [xAsrBilingualZhEnInt8, kwsModel] : [kwsModel],
+        cacheDir: sharedCacheDir,
+        endpoint: sherpawModelEndpoint,
+      }),
       DownloadLive2DSDK(),
       Download('https://dist.ayaka.moe/live2d-models/hiyori_free_zh.zip', 'hiyori_free_zh.zip', 'live2d/models', { parentDir: stageUIAssetsRoot, cacheDir: sharedCacheDir }),
       Download('https://dist.ayaka.moe/live2d-models/hiyori_pro_zh.zip', 'hiyori_pro_zh.zip', 'live2d/models', { parentDir: stageUIAssetsRoot, cacheDir: sharedCacheDir }),

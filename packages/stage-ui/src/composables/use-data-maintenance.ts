@@ -1,10 +1,13 @@
 import type { ChatSessionsExport } from '../types/chat-session'
 
 import { isStageTamagotchi } from '@proj-airi/stage-shared'
-import { useLive2dParams, useSettingsLive2d } from '@proj-airi/stage-ui-live2d'
+import { useSettingsScreenAmbientLight } from '@proj-airi/stage-shared/stores/screen-ambient-light'
+import { useSettingsLive2d } from '@proj-airi/stage-ui-live2d/composables/live2d'
+import { useLive2dParams } from '@proj-airi/stage-ui-live2d/stores/model-parameters'
 import { useModelStore } from '@proj-airi/stage-ui-three'
 
 import { useLive2DMotionMagicSettings } from '../features/motions/live2d'
+import { clearSherpawModelAssets } from '../libs/providers/providers/sherpaw/model-assets'
 import { useChatStore } from '../stores/chat'
 import { useChatSessionStore } from '../stores/chat/session-store'
 import { useDisplayModelsStore } from '../stores/display-models'
@@ -16,6 +19,8 @@ import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
+import { useHomeAssistantStore } from '../stores/modules/home-assistant'
+import { useMemoryStore } from '../stores/modules/memory'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useTwitterStore } from '../stores/modules/twitter'
 import { useWebSearchStore } from '../stores/modules/web-search'
@@ -33,8 +38,10 @@ export function useDataMaintenance() {
   const live2dParamsStore = useLive2dParams()
   const live2dSettingsStore = useSettingsLive2d()
   const live2dMagicSettingsStore = useLive2DMotionMagicSettings()
+  const screenAmbientLightSettingsStore = useSettingsScreenAmbientLight()
   const threeStore = useModelStore()
   const hearingStore = useHearingStore()
+  const homeAssistantStore = useHomeAssistantStore()
   const speechStore = useSpeechStore()
   const consciousnessStore = useConsciousnessStore()
   const consciousnessSettingsStore = useConsciousnessSettingsStore()
@@ -46,6 +53,7 @@ export function useDataMaintenance() {
   const mcpStore = useMcpStore()
   const onboardingStore = useOnboardingStore()
   const airiCardStore = useAiriCardStore()
+  const memoryStore = useMemoryStore()
 
   async function deleteAllModels() {
     await displayModelsStore.resetDisplayModels()
@@ -57,21 +65,31 @@ export function useDataMaintenance() {
     await providersStore.resetProviderSettings()
   }
 
+  /** Attempts every independent reset and reports the first failure only after all operations settle. */
   async function resetModulesSettings() {
-    hearingStore.resetState()
-    speechStore.resetState()
-    consciousnessStore.resetState()
-    await consciousnessSettingsStore.resetState()
-    twitterStore.resetState()
-    webSearchStore.resetState()
-    discordStore.resetState()
-    factorioStore.resetState()
-    minecraftStore.resetState()
+    // Schedule each reset separately so both synchronous errors and rejected
+    // leader RPCs leave the other modules free to finish their cleanup.
+    const results = await Promise.allSettled([
+      () => hearingStore.resetState(),
+      () => homeAssistantStore.resetState(),
+      () => speechStore.resetState(),
+      () => consciousnessStore.resetState(),
+      () => consciousnessSettingsStore.resetState(),
+      () => twitterStore.resetState(),
+      () => webSearchStore.resetState(),
+      () => memoryStore.resetState(),
+      () => discordStore.resetState(),
+      () => factorioStore.resetState(),
+      () => minecraftStore.resetState(),
+    ].map(reset => Promise.resolve().then(reset)))
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure)
+      throw failure.reason
   }
 
-  function deleteAllChatSessions() {
-    chatOrchestrator.cancelPendingSends()
-    chatStore.resetAllSessions()
+  async function deleteAllChatSessions() {
+    await chatOrchestrator.cancelPendingSends()
+    await chatStore.resetAllSessions()
   }
 
   async function exportChatSessions() {
@@ -98,6 +116,7 @@ export function useDataMaintenance() {
     live2dParamsStore.resetState()
     live2dSettingsStore.resetState()
     live2dMagicSettingsStore.resetState()
+    screenAmbientLightSettingsStore.resetState()
     threeStore.resetModelStore()
     mcpStore.resetState()
     onboardingStore.resetSetupState()
@@ -105,11 +124,14 @@ export function useDataMaintenance() {
   }
 
   async function deleteAllData() {
+    // Revoke consent and invalidate delayed captures before the remaining application data is deleted.
+    await memoryStore.clearAll()
     await deleteAllModels()
     await resetProvidersSettings()
     await resetModulesSettings()
-    deleteAllChatSessions()
+    await deleteAllChatSessions()
     await resetSettingsState()
+    await clearSherpawModelAssets()
   }
 
   async function resetDesktopApplicationState() {

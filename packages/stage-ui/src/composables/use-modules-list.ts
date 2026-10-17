@@ -6,13 +6,18 @@ import { useI18n } from 'vue-i18n'
 
 import factorioIcon from '../assets/factorio-simple.png'
 
+import { useAuthStore } from '../stores/auth'
+import { useAiriCardStore } from '../stores/modules/airi-card'
 import { useArtistryStore } from '../stores/modules/artistry'
 import { useConsciousnessStore } from '../stores/modules/consciousness'
 import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
+import { useHomeAssistantStore } from '../stores/modules/home-assistant'
+import { useMemoryStore } from '../stores/modules/memory'
 import { useSpeechStore } from '../stores/modules/speech'
+import { useStickersStore } from '../stores/modules/stickers'
 import { useTwitterStore } from '../stores/modules/twitter'
 import { useVisionStore } from '../stores/modules/vision'
 import { useWebSearchStore } from '../stores/modules/web-search'
@@ -35,6 +40,7 @@ export function useModulesList() {
   // Initialize stores
   const consciousnessStore = useConsciousnessStore()
   const speechStore = useSpeechStore()
+  const stickersStore = useStickersStore()
   const hearingStore = useHearingStore()
   const visionStore = useVisionStore()
   const discordStore = useDiscordStore()
@@ -42,7 +48,11 @@ export function useModulesList() {
   const webSearchStore = useWebSearchStore()
   const minecraftStore = useMinecraftStore()
   const factorioStore = useFactorioStore()
+  const homeAssistantStore = useHomeAssistantStore()
   const artistryStore = useArtistryStore()
+  const memoryStore = useMemoryStore()
+  const authStore = useAuthStore()
+  const cardStore = useAiriCardStore()
   const beatSyncState = ref<BeatSyncDetectorState>()
   const beatSyncSupported = isBeatSyncSupported()
 
@@ -86,6 +96,15 @@ export function useModulesList() {
       category: 'essential',
     },
     {
+      id: 'stickers',
+      name: t('settings.pages.modules.stickers.title'),
+      description: t('settings.pages.modules.stickers.description'),
+      icon: 'i-solar:sticker-smile-circle-bold-duotone',
+      to: '/settings/modules/stickers',
+      configured: stickersStore.enabled,
+      category: 'essential',
+    },
+    {
       id: 'web-search',
       name: t('settings.pages.modules.web-search.title'),
       description: t('settings.pages.modules.web-search.description'),
@@ -118,7 +137,7 @@ export function useModulesList() {
       description: t('settings.pages.modules.memory-long-term.description'),
       icon: 'i-solar:book-bookmark-bold-duotone',
       to: '/settings/modules/memory-long-term',
-      configured: false,
+      configured: memoryStore.isEnabled({ userId: authStore.userId || 'local', characterId: cardStore.activeCardId || 'default' }),
       category: 'essential',
     },
     {
@@ -156,6 +175,15 @@ export function useModulesList() {
       to: '/settings/modules/gaming-factorio',
       configured: factorioStore.configured,
       category: 'gaming',
+    },
+    {
+      id: 'home-assistant',
+      name: t('settings.pages.modules.home-assistant.title'),
+      description: t('settings.pages.modules.home-assistant.description'),
+      icon: 'i-solar:home-smile-bold-duotone',
+      to: '/settings/modules/home-assistant',
+      configured: homeAssistantStore.configured,
+      category: 'essential',
     },
     {
       id: 'mcp-server',

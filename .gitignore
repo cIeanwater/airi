@@ -5,6 +5,11 @@
 # Node.js
 node_modules
 
+# Local model weights for developer inference and training experiments
+/local-models/
+/AIRI_QWEN_*.json
+__pycache__/
+
 # Logs
 *.log
 *.logs
@@ -158,3 +163,8 @@ __screenshots__
 packages/i18n/glossary/glossary.tbx
 
 /airi-docs/
+.worktrees/
+
+# Sherpaw models downloaded by the Vite plugin
+apps/*/public/sherpaw/
+apps/*/src/renderer/public/sherpaw/

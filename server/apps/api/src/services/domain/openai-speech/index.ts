@@ -1,11 +1,8 @@
 import type { GenAiMetrics } from '../../../otel'
 import type { ConfigKVService } from '../../adapters/config-kv'
-import type { FluxMeter } from '../billing/flux-meter'
-import type { FluxService } from '../flux'
+import type { SpeechBilling } from '../billing/speech-billing'
 import type { LlmRouterService } from '../llm-router'
-import type { startTtsGeneration, TtsGenerationTrace } from '../llm-tracing'
 import type { ProviderCatalogService } from '../provider-catalog'
-import type { RequestLogService } from '../request-log'
 import type { VoicePackService } from '../voice-packs'
 
 import { useLogger } from '@guiiai/logg'
@@ -28,6 +25,11 @@ const SAFE_RESPONSE_HEADERS = new Set([
   'cache-control',
 ])
 
+const SAFE_ERROR_RESPONSE_HEADERS = new Set([
+  'content-type',
+  'retry-after',
+])
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value == null || Array.isArray(value))
     return undefined
@@ -42,17 +44,12 @@ function readOptionalNumber(record: Record<string, unknown> | undefined, key: st
 }
 
 export interface OpenAiSpeechServiceDeps {
-  fluxService: FluxService
   configKV: ConfigKVService
-  requestLogService: RequestLogService
-  ttsMeter: FluxMeter
+  speechBilling: SpeechBilling
   llmRouter: LlmRouterService
   voicePackService: VoicePackService
   providerCatalogService: ProviderCatalogService
   genAi?: GenAiMetrics | null
-  llmTracing: {
-    startTtsGeneration: (input: Parameters<typeof startTtsGeneration>[0]) => TtsGenerationTrace
-  }
 }
 
 export interface OpenAiSpeechRequest {
@@ -66,6 +63,7 @@ type TtsTrigger = 'auto' | 'manual'
 interface TtsAnalyticsContext {
   trigger: TtsTrigger
   source: 'audio.speech' | 'chat_auto_tts' | 'manual_preview' | 'settings_test'
+  turnId?: string
 }
 
 /**
@@ -116,9 +114,8 @@ export function createOpenAiSpeechService(deps: OpenAiSpeechServiceDeps) {
       voice: requestVoice,
     }).log('tts speech request')
 
-    const flux = await deps.fluxService.getFlux(input.userId)
     try {
-      await deps.ttsMeter.assertCanAfford(input.userId, billingUnits, flux.flux)
+      await deps.speechBilling.assertCanAfford(input.userId, billingUnits)
     }
     catch (err) {
       if (!(err instanceof ApiError) || err.statusCode !== 402)
@@ -146,14 +143,6 @@ export function createOpenAiSpeechService(deps: OpenAiSpeechServiceDeps) {
       extraOptions: voicePackRequest.extraOptions,
     }
 
-    const generationTrace = deps.llmTracing.startTtsGeneration({
-      input: ttsInput,
-      model: requestModel,
-      requestId,
-      userId: input.userId,
-      sessionId: input.sessionId,
-    })
-
     const span = tracer.startSpan('llm.gateway.tts', {
       attributes: {
         [GEN_AI_ATTR_REQUEST_MODEL]: requestModel,
@@ -176,7 +165,6 @@ export function createOpenAiSpeechService(deps: OpenAiSpeechServiceDeps) {
       const failure = routerFailure(err)
       span.setStatus({ code: SpanStatusCode.ERROR, message: failure.message })
       span.end()
-      generationTrace.fail(failure.message)
       recordMetrics({
         durationMs: Date.now() - startedAt,
         fluxConsumed: 0,
@@ -193,35 +181,29 @@ export function createOpenAiSpeechService(deps: OpenAiSpeechServiceDeps) {
     if (!response.ok) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: `Gateway ${response.status}` })
       span.end()
-      generationTrace.fail(`Gateway ${response.status}`)
       recordMetrics({ model: requestModel, status: response.status, provider: routeCtx.provider, durationMs, fluxConsumed: 0 })
       logger.withFields({ requestId, userId: input.userId, model: requestModel, status: response.status, durationMs })
         .warn('tts speech delivered with upstream error status')
       return new Response(response.body, {
         status: response.status,
-        headers: buildSafeResponseHeaders(response),
+        headers: buildSafeErrorResponseHeaders(response),
       })
     }
 
     let fluxConsumed = 0
     try {
-      const result = await deps.ttsMeter.accumulate({
+      const result = await deps.speechBilling.settle({
         userId: input.userId,
         units: billingUnits,
-        currentBalance: flux.flux,
         requestId,
-        metadata: { model: requestModel, costMultiplier: voicePackRequest.costMultiplier },
+        model: requestModel,
+        turnId: analytics.turnId,
+        provider: routeCtx.provider,
       })
-      fluxConsumed = result.fluxDebited
+      fluxConsumed = result.feeFlux
       span.setAttribute(AIRI_ATTR_BILLING_FLUX_CONSUMED, fluxConsumed)
-      generationTrace.succeed({
-        inputChars: inputText.length,
-        fluxConsumed,
-        output: { contentType: response.headers.get('content-type') },
-      })
     }
     catch (err) {
-      generationTrace.fail('TTS billing failed')
       throw err
     }
     finally {
@@ -229,13 +211,6 @@ export function createOpenAiSpeechService(deps: OpenAiSpeechServiceDeps) {
     }
 
     recordMetrics({ model: requestModel, status: response.status, provider: routeCtx.provider, durationMs, fluxConsumed })
-    deps.requestLogService.logRequest({
-      userId: input.userId,
-      model: requestModel,
-      status: response.status,
-      durationMs,
-      fluxConsumed,
-    }).catch(err => logger.withError(err).warn('Failed to write llm_request_log row'))
 
     logger.withFields({
       requestId,
@@ -284,7 +259,8 @@ function ttsAnalyticsContext(body: Record<string, unknown>): TtsAnalyticsContext
     || rawSource === 'settings_test'
     ? rawSource
     : 'audio.speech'
-  return { trigger, source }
+  const turnId = typeof analytics?.turn_id === 'string' ? analytics.turn_id : undefined
+  return { trigger, source, turnId }
 }
 
 async function voicePackRequestOptions(
@@ -379,6 +355,15 @@ function buildSafeResponseHeaders(response: Response): Headers {
   const headers = new Headers()
   response.headers.forEach((value, key) => {
     if (SAFE_RESPONSE_HEADERS.has(key.toLowerCase()))
+      headers.set(key, value)
+  })
+  return headers
+}
+
+function buildSafeErrorResponseHeaders(response: Response): Headers {
+  const headers = new Headers()
+  response.headers.forEach((value, key) => {
+    if (SAFE_ERROR_RESPONSE_HEADERS.has(key.toLowerCase()))
       headers.set(key, value)
   })
   return headers

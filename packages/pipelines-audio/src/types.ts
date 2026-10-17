@@ -1,3 +1,5 @@
+import type { StreamingControlEmotionPayload } from './llm-streaming-control/payloads'
+
 export type PriorityLevel = 'critical' | 'high' | 'normal' | 'low'
 
 export interface PriorityResolver {
@@ -33,6 +35,10 @@ export interface TtsRequest {
   sequence: number
   text: string
   special: string | null
+  /** Synthesis uses preceding ACT controls, independent of playback timing and later segments. */
+  readonly emotion?: Readonly<StreamingControlEmotionPayload>
+  /** Chunker boundary that produced this text. Tracing uses it to explain synthesis latency. */
+  reason: TextSegment['reason']
   priority: number
   createdAt: number
 }

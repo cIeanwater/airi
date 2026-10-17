@@ -3,7 +3,11 @@ import type { Ref } from 'vue'
 import type { ExpressionBlendMode, ExpressionEntry, ExpressionGroupDefinition } from '../../stores/expression-store'
 import type { PixiLive2DInternalModel } from './motion-manager'
 
+import { ref } from 'vue'
+
+import { Emotion, EMOTION_EmotionMotionName_value, EMOTION_VALUES } from '../../constants/emotions'
 import { useExpressionStore } from '../../stores/expression-store'
+import { emotionFaceTargets, normalizeEmotionIntensity } from './emotion'
 
 // ---------------------------------------------------------------------------
 // Types for model3.json / exp3.json data
@@ -39,12 +43,11 @@ export interface ExpressionControllerOptions {
    * while a model is being swapped).
    */
   internalModel: Ref<PixiLive2DInternalModel | undefined>
-
   /**
-   * An optional model identifier used for persistence scoping.
-   * Falls back to `'unknown'` if not provided.
+   * Applies manual expression values from the store. Chat emotions remain active independently.
+   * @default true
    */
-  modelId?: string
+  manualEnabled?: Ref<boolean>
 }
 
 /**
@@ -59,6 +62,87 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   // Track which parameter IDs were written in the previous frame so we can
   // detect active→inactive transitions and explicitly reset them.
   const activeLastFrame = new Set<string>()
+  // Chat emotions are transient overlays. Manual settings and saved defaults
+  // stay in the store. A new emotion, neutral, reload, or disposal releases this overlay.
+  const emotionParameters = new Map<string, ExpressionEntry>()
+  const emotionActive = ref(false)
+  let emotionResetTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Applies a named model expression, or standard face parameters when no expression matches.
+   * The overlay yields after the duration and never changes saved expression defaults.
+   */
+  function setEmotion(name: string, intensity = 1, duration = 3000): boolean {
+    const emotion = EMOTION_VALUES.find(value => value === name.toLowerCase())
+    const coreModel = options.internalModel.value?.coreModel
+    if (!emotion || !coreModel)
+      return false
+
+    if (emotionResetTimer !== undefined)
+      clearTimeout(emotionResetTimer)
+    emotionResetTimer = undefined
+    emotionParameters.clear()
+    emotionActive.value = false
+    const weight = normalizeEmotionIntensity(intensity)
+    if (emotion === Emotion.Neutral || weight === 0)
+      return true
+
+    const groupName = EMOTION_EmotionMotionName_value[emotion].toLowerCase()
+    const group = [...store.expressionGroups.values()].find(group =>
+      group.name.toLowerCase() === emotion || group.name.toLowerCase() === groupName,
+    )
+    // Authored expressions carry the model's intended appearance. Standard
+    // Cubism parameters cover models such as Hiyori, which supplies no exp3 files.
+    const parameters = group?.parameters ?? Object.entries(emotionFaceTargets[emotion]).map(([parameterId, value]) => ({
+      parameterId,
+      value,
+      blend: 'Overwrite' as const,
+    }))
+    for (const parameter of parameters) {
+      const index = coreModel.getParameterIndex(parameter.parameterId)
+      // Cubism creates virtual indices for unknown IDs. They cannot alter the rig.
+      if (index < 0 || index >= coreModel.getParameterCount())
+        continue
+
+      const modelDefault = getModelParameterDefault(parameter.parameterId)
+      let identity = modelDefault
+      if (parameter.blend === 'Add')
+        identity = 0
+      else if (parameter.blend === 'Multiply')
+        identity = 1
+      let targetValue = parameter.value
+      if (!group && parameter.parameterId === 'ParamCheek') {
+        // Hiyori Free uses negative blush values, while Pro uses positive values.
+        // Choose the available direction from the rig default.
+        const maximum = coreModel.getParameterMaximumValue(index)
+        const endpoint = maximum > modelDefault ? maximum : coreModel.getParameterMinimumValue(index)
+        targetValue = modelDefault + (endpoint - modelDefault) * parameter.value
+      }
+      let value = identity + (targetValue - identity) * weight
+      if (parameter.blend === 'Overwrite') {
+        value = Math.max(coreModel.getParameterMinimumValue(index), Math.min(coreModel.getParameterMaximumValue(index), value))
+      }
+      emotionParameters.set(parameter.parameterId, {
+        name: parameter.parameterId,
+        parameterId: parameter.parameterId,
+        blend: parameter.blend,
+        modelDefault,
+        defaultValue: identity,
+        currentValue: value,
+        targetValue,
+      })
+    }
+
+    if (emotionParameters.size === 0)
+      return false
+    emotionActive.value = true
+    emotionResetTimer = setTimeout(() => {
+      emotionParameters.clear()
+      emotionActive.value = false
+      emotionResetTimer = undefined
+    }, duration)
+    return true
+  }
 
   // ---- Initialisation (called once after model load) ----------------------
 
@@ -66,15 +150,19 @@ export function useExpressionController(options: ExpressionControllerOptions) {
    * Parse model3.json expression references and the corresponding exp3 data,
    * then register everything in the store.
    *
+   * @param modelId        - The identifier captured for this model load. It
+   *                         scopes expression persistence to the loaded model.
    * @param expressionRefs - `FileReferences.Expressions` from model3.json
    * @param readExpFile    - An async function that reads the content of an
    *                         exp3.json file given its path (relative to the
    *                         model root inside the ZIP / OPFS).
    */
   async function initialise(
+    modelId: string | undefined,
     expressionRefs: Model3ExpressionRef[],
     readExpFile: (path: string) => Promise<string>,
   ) {
+    dispose()
     const groups: ExpressionGroupDefinition[] = []
     const entryMap = new Map<string, ExpressionEntry>()
 
@@ -126,7 +214,7 @@ export function useExpressionController(options: ExpressionControllerOptions) {
     }
 
     store.registerExpressions(
-      options.modelId ?? 'unknown',
+      modelId ?? 'unknown',
       groups,
       Array.from(entryMap.values()),
     )
@@ -155,6 +243,8 @@ export function useExpressionController(options: ExpressionControllerOptions) {
     const activeThisFrame = new Set<string>()
 
     for (const entry of store.expressions.values()) {
+      if (options.manualEnabled?.value === false)
+        break
       if (isNoopValue(entry))
         continue
 
@@ -164,13 +254,17 @@ export function useExpressionController(options: ExpressionControllerOptions) {
       activeThisFrame.add(entry.parameterId)
     }
 
+    for (const entry of emotionParameters.values()) {
+      coreModel.setParameterValueById(entry.parameterId, computeTargetValue(entry, coreModel))
+      activeThisFrame.add(entry.parameterId)
+    }
+
     // Reset parameters that were active last frame but not this frame.
     // This handles the active→inactive transition (e.g. toggle OFF).
     for (const paramId of activeLastFrame) {
       if (!activeThisFrame.has(paramId)) {
         const entry = findEntryByParameterId(paramId)
-        if (entry)
-          coreModel.setParameterValueById(paramId, entry.modelDefault)
+        coreModel.setParameterValueById(paramId, entry?.modelDefault ?? getModelParameterDefault(paramId))
       }
     }
 
@@ -231,6 +325,12 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   // ---- Cleanup -------------------------------------------------------------
 
   function dispose() {
+    if (emotionResetTimer !== undefined)
+      clearTimeout(emotionResetTimer)
+    emotionResetTimer = undefined
+    emotionParameters.clear()
+    emotionActive.value = false
+    activeLastFrame.clear()
     store.dispose()
   }
 
@@ -248,34 +348,23 @@ export function useExpressionController(options: ExpressionControllerOptions) {
   }
 
   /**
-   * Read the model default for a parameter from the currently loaded model.
-   * Falls back to 0 if the model is not available yet (the store will sync
-   * later via `restoreDefaults`).
+   * Reads the rig default rather than the current animated value.
+   * Unknown parameters use zero because they cannot affect the loaded rig.
    */
   function getModelParameterDefault(parameterId: string): number {
-    const im = options.internalModel.value
-    if (!im)
+    const coreModel = options.internalModel.value?.coreModel
+    if (!coreModel)
       return 0
-
-    try {
-      // Prefer the dedicated default-value API when available (Cubism 4+).
-      const defaultApi = (im.coreModel as any).getParameterDefaultValueById
-      if (typeof defaultApi === 'function') {
-        const val = defaultApi.call(im.coreModel, parameterId)
-        if (val != null)
-          return val as number
-      }
-      // Fall back to the current value which, right after model load, IS
-      // the default.
-      return (im.coreModel.getParameterValueById(parameterId) as number) ?? 0
-    }
-    catch {
+    const index = coreModel.getParameterIndex(parameterId)
+    if (index < 0 || index >= coreModel.getParameterCount())
       return 0
-    }
+    return coreModel.getParameterDefaultValue(index)
   }
 
   return {
     initialise,
+    setEmotion,
+    emotionActive,
     applyExpressions,
     dispose,
   }

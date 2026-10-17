@@ -1,15 +1,19 @@
 import type { ChatStreamEvent, ChatStreamEventContext, ContextMessage } from '../../../types/chat'
 
 import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
+import { chatAssetsRepo } from '../../../database/repos/chat-assets.repo'
+import { storeChatAsset } from '../../../libs/chat-assets'
 import { CHAT_STREAM_CHANNEL_NAME, CONTEXT_CHANNEL_NAME } from '../../chat/constants'
+import { useConsciousnessStore } from '../../modules/consciousness'
+import { useConsciousnessSettingsStore } from '../../modules/consciousness-settings'
+import { useContextBridgeStore } from './context-bridge'
 import { createContextChannel } from './context-channel'
 
 type HookCallback = (...args: unknown[]) => Promise<void> | void
-type UseContextBridgeStore = typeof import('./context-bridge')['useContextBridgeStore']
 
 const contextUpdateHooks: HookCallback[] = []
 const serverEventHooks = new Map<string, HookCallback[]>()
@@ -28,8 +32,8 @@ const onEventMock = vi.fn((eventName: string, callback: HookCallback) => registe
 const getProviderInstanceMock = vi.fn()
 const recordLifecycleMock = vi.fn()
 
-const activeProviderRef = ref<string | null>(null)
-const activeModelRef = ref<string | null>(null)
+let pinia: ReturnType<typeof createPinia>
+let consciousness: ReturnType<typeof useConsciousnessStore>
 
 const beforeComposeHooks: HookCallback[] = []
 const afterComposeHooks: HookCallback[] = []
@@ -43,9 +47,9 @@ const assistantMessageHooks: HookCallback[] = []
 const turnCompleteHooks: HookCallback[] = []
 
 const activeSessionIdRef = ref('session-1')
+const storedSessionMessages: Record<string, unknown[]> = {}
 let currentGeneration = 7
 const testChannels: Array<ReturnType<typeof createContextChannel>> = []
-let useContextBridgeStore: UseContextBridgeStore
 
 function registerHook(target: HookCallback[], callback: HookCallback) {
   target.push(callback)
@@ -160,7 +164,9 @@ function createContextUpdateEvent(overrides: Record<string, unknown> = {}) {
 const chatOrchestratorMock = {
   activeSendSessionId: undefined as string | undefined,
   sending: false,
-  ingest: vi.fn(),
+  send: vi.fn(),
+  cancelPendingSends: vi.fn(),
+  cancelTurn: vi.fn(),
 
   onBeforeMessageComposed: (callback: HookCallback) => registerHook(beforeComposeHooks, callback),
   onAfterMessageComposed: (callback: HookCallback) => registerHook(afterComposeHooks, callback),
@@ -183,31 +189,12 @@ const chatOrchestratorMock = {
   emitAssistantResponseEndHooks: (...args: unknown[]) => emitHooks(assistantEndHooks, ...args),
 }
 
-vi.mock('pinia', async () => {
-  const actual = await vi.importActual<typeof import('pinia')>('pinia')
-  return {
-    ...actual,
-    storeToRefs: (store: unknown) => store,
-  }
-})
-
 vi.mock('@proj-airi/stage-shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@proj-airi/stage-shared')>()
   return {
     ...actual,
     isStageWeb: () => true,
     isStageTamagotchi: () => false,
-  }
-})
-
-vi.mock('es-toolkit', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('es-toolkit')>()
-  return {
-    ...actual,
-    Mutex: class {
-      async acquire() {}
-      release() {}
-    },
   }
 })
 
@@ -239,6 +226,7 @@ vi.mock('../../chat/session-store', () => ({
       return activeSessionIdRef.value
     },
     getSessionGenerationValue: () => currentGeneration,
+    getSessionMessagesIfLoaded: (sessionId: string) => storedSessionMessages[sessionId],
     refreshSession: (sessionId: string) => refreshSessionMock(sessionId),
   }),
 }))
@@ -258,19 +246,12 @@ vi.mock('../../devtools/context-observability', () => ({
   }),
 }))
 
-vi.mock('../../modules/consciousness', () => ({
-  useConsciousnessStore: () => ({
-    activeProvider: activeProviderRef,
-    activeModel: activeModelRef,
-    getChatProviderInstance: getProviderInstanceMock,
-  }),
-}))
-
 vi.mock('../../providers/provider', () => ({
   useProviderStore: () => ({
     configuredSpeechProvidersMetadata: [],
     getProviderConfig: vi.fn(() => ({})),
     getProviderInstance: getProviderInstanceMock,
+    getChatProviderInstance: getProviderInstanceMock,
     providerRuntimeState: {},
   }),
 }))
@@ -286,9 +267,11 @@ vi.mock('./channel-server', () => ({
 }))
 
 describe('context bridge contract', () => {
-  beforeEach(async () => {
-    setActivePinia(createPinia())
-    ;({ useContextBridgeStore } = await import('./context-bridge'))
+  beforeEach(() => {
+    localStorage.clear()
+    pinia = createPinia()
+    setActivePinia(pinia)
+    consciousness = useConsciousnessStore(pinia)
 
     chatContextIngestMock.mockReset()
     beginStreamMock.mockReset()
@@ -304,10 +287,12 @@ describe('context bridge contract', () => {
     onEventMock.mockClear()
     getProviderInstanceMock.mockReset()
     recordLifecycleMock.mockReset()
-    chatOrchestratorMock.ingest.mockReset()
+    chatOrchestratorMock.send.mockReset().mockResolvedValue(undefined)
+    chatOrchestratorMock.cancelPendingSends.mockReset().mockResolvedValue(undefined)
+    chatOrchestratorMock.cancelTurn.mockReset().mockResolvedValue(undefined)
 
-    activeProviderRef.value = null
-    activeModelRef.value = null
+    consciousness.activeProvider = ''
+    consciousness.activeModel = ''
     activeSessionIdRef.value = 'session-1'
     chatOrchestratorMock.activeSendSessionId = undefined
     currentGeneration = 7
@@ -327,8 +312,97 @@ describe('context bridge contract', () => {
     serverEventHooks.clear()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    // A failed assertion skips the test's explicit disposal. Close the bridge
+    // before its peers and Pinia scope so later tests cannot receive old hooks.
+    await useContextBridgeStore(pinia).dispose()
     closeTestChannels()
+    disposePinia(pinia)
+    vi.restoreAllMocks()
+    localStorage.clear()
+  })
+
+  it('lists the images and recordings of the turn in the chat message event', async () => {
+    storedSessionMessages['session-1'] = [{
+      id: 'turn-1',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'look' },
+        { type: 'image_url', image_url: { url: 'airi-asset:image' } },
+        { type: 'input_audio', input_audio: { data: 'airi-asset:voice', format: 'wav' } },
+      ],
+      audioTranscripts: ['hello there'],
+    }]
+    const store = useContextBridgeStore()
+    await store.initialize()
+
+    await emitHooks(assistantMessageHooks, { role: 'assistant', content: 'hi' }, 'hi', {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'look' },
+      contexts: {},
+      composedMessage: [],
+    })
+
+    const event = serverSendMock.mock.calls.find(([sent]) => sent.type === 'output:gen-ai:chat:message')?.[0]
+    expect(event?.data['gen-ai:chat'].attachments).toEqual([
+      { type: 'image', ref: 'airi-asset:image' },
+      { type: 'audio', ref: 'airi-asset:voice', mimeType: 'audio/wav', transcript: 'hello there' },
+    ])
+    delete storedSessionMessages['session-1']
+  })
+
+  it('ignores an asset read that the server did not attribute to a module', async () => {
+    const ref = await storeChatAsset(new Uint8Array([82, 73, 70, 70]), 'audio/wav', 'session-1')
+    const store = useContextBridgeStore()
+    await store.initialize()
+
+    // The source claims a module, but the server-stamped sender names no announced module.
+    await emitServerEvent('asset:get:request', {
+      type: 'asset:get:request',
+      data: { ref },
+      metadata: { ...createMetadata('discord', 'discord-1'), event: { id: 'request-3' }, sender: { peerId: 'peer-8', modules: [] } },
+    })
+    await emitServerEvent('asset:get:request', {
+      type: 'asset:get:request',
+      data: { ref },
+      metadata: { ...createMetadata('discord', 'discord-1'), event: { id: 'request-4' } },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(serverSendMock.mock.calls.filter(([event]) => event.type === 'asset:get:response')).toEqual([])
+    await chatAssetsRepo.clear()
+  })
+
+  it('answers an asset read to the asking module only', async () => {
+    const ref = await storeChatAsset(new Uint8Array([82, 73, 70, 70]), 'audio/wav', 'session-1')
+    const store = useContextBridgeStore()
+    await store.initialize()
+
+    await emitServerEvent('asset:get:request', {
+      type: 'asset:get:request',
+      data: { ref },
+      metadata: { ...createMetadata('discord', 'discord-1'), event: { id: 'request-1' }, sender: { peerId: 'peer-7', modules: ['discord'] } },
+    })
+    await emitServerEvent('asset:get:request', {
+      type: 'asset:get:request',
+      data: { ref: 'airi-asset:missing' },
+      metadata: { ...createMetadata('discord', 'discord-1'), event: { id: 'request-2' }, sender: { peerId: 'peer-7', modules: ['discord'] } },
+    })
+
+    const answers = () => serverSendMock.mock.calls.filter(([event]) => event.type === 'asset:get:response')
+    await vi.waitFor(() => expect(answers()).toHaveLength(2))
+    expect(serverSendMock).toHaveBeenCalledWith({
+      type: 'asset:get:response',
+      data: { ref, mimeType: 'audio/wav', data: 'UklGRg==' },
+      metadata: { event: { parentId: 'request-1' } },
+      route: { destinations: ['peer:peer-7'] },
+    })
+    expect(serverSendMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: { ref: 'airi-asset:missing', error: expect.stringContaining('missing') },
+      metadata: { event: { parentId: 'request-2' } },
+    }))
+    await chatAssetsRepo.clear()
   })
 
   it('records core ingest result for broadcast context updates', async () => {
@@ -397,14 +471,22 @@ describe('context bridge contract', () => {
     await store.dispose()
   })
 
+  // https://github.com/moeru-ai/airi/actions/runs/34237304157/job/102098223378
+  // ROOT CAUSE:
+  // The old consciousness mock omitted temperature and top-p. Input handling
+  // failed before ingest. Use the real store and verify both request settings.
   it('records core ingest result for input context updates and forwards accepted updates', async () => {
     chatContextIngestMock.mockReturnValueOnce({
       sourceKey: 'weather:station-1',
       mutation: 'append',
       entryCount: 1,
     })
-    activeProviderRef.value = 'mock-provider'
-    activeModelRef.value = 'mock-model'
+    consciousness.activeProvider = 'mock-provider'
+    consciousness.activeModel = 'mock-model'
+    consciousness.temperature = 0.3
+    consciousness.topP = 0.8
+    await useConsciousnessSettingsStore().setTemperatureEnabled(true)
+    await useConsciousnessSettingsStore().setTopPEnabled(true)
     getProviderInstanceMock.mockResolvedValueOnce({})
     const store = useContextBridgeStore()
     await store.initialize()
@@ -435,8 +517,14 @@ describe('context bridge contract', () => {
         inputType: 'input:text',
       }),
     }))
-    expect(chatOrchestratorMock.ingest).toHaveBeenCalledTimes(1)
-    expect(chatOrchestratorMock.ingest.mock.calls[0]?.[1]?.input?.data.contextUpdates).toEqual([
+    expect(chatOrchestratorMock.send).toHaveBeenCalledTimes(1)
+    expect(chatOrchestratorMock.send.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: 'session-1',
+      text: 'hello',
+      temperature: 0.3,
+      topP: 0.8,
+    })
+    expect(chatOrchestratorMock.send.mock.calls[0]?.[0]?.input?.data.contextUpdates).toEqual([
       expect.objectContaining({
         contextId: expect.any(String),
         id: expect.any(String),
@@ -510,8 +598,8 @@ describe('context bridge contract', () => {
     chatContextIngestMock.mockImplementationOnce(() => {
       throw new Error('Cannot clone input context')
     })
-    activeProviderRef.value = 'mock-provider'
-    activeModelRef.value = 'mock-model'
+    consciousness.activeProvider = 'mock-provider'
+    consciousness.activeModel = 'mock-model'
     getProviderInstanceMock.mockResolvedValueOnce({})
     const store = useContextBridgeStore()
     await store.initialize()
@@ -538,8 +626,8 @@ describe('context bridge contract', () => {
         errorMessage: 'Cannot clone input context',
       }),
     }))
-    expect(chatOrchestratorMock.ingest).toHaveBeenCalledTimes(1)
-    expect(chatOrchestratorMock.ingest.mock.calls[0]?.[1]?.input?.data.contextUpdates).toEqual([])
+    expect(chatOrchestratorMock.send).toHaveBeenCalledTimes(1)
+    expect(chatOrchestratorMock.send.mock.calls[0]?.[0]?.input?.data.contextUpdates).toEqual([])
 
     await store.dispose()
   })
@@ -557,6 +645,7 @@ describe('context bridge contract', () => {
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
 
     const context = {
+      sessionId: 'session-1',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},
@@ -589,6 +678,154 @@ describe('context bridge contract', () => {
     await store.dispose()
   })
 
+  it('routes remote stream cancellation to the renderer that produced the turn', async () => {
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamPeer = createContextChannel()
+    testChannels.push(streamPeer)
+    const context = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    await chatOrchestratorMock.emitBeforeSendHooks('ping', context)
+    await streamPeer.emitStreamCancel({ sessionId: 'session-1', turnId: 'turn-1' })
+
+    await vi.waitFor(() => {
+      expect(chatOrchestratorMock.cancelTurn).toHaveBeenCalledWith({ sessionId: 'session-1', turnId: 'turn-1' })
+    })
+    await store.dispose()
+  })
+
+  it('broadcasts cancellation when the producing renderer stops its turn', async () => {
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamPeer = createContextChannel()
+    testChannels.push(streamPeer)
+    const cancellations: Array<{ sessionId: string, turnId: string }> = []
+    streamPeer.onStreamCancel((command) => {
+      cancellations.push(command)
+    })
+    const context = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    await chatOrchestratorMock.emitBeforeSendHooks('ping', context)
+    await store.cancelRemoteStream('session-1')
+
+    await vi.waitFor(() => {
+      expect(cancellations).toEqual([{ sessionId: 'session-1', turnId: 'turn-1' }])
+    })
+    expect(chatOrchestratorMock.cancelPendingSends).not.toHaveBeenCalled()
+    await store.dispose()
+  })
+
+  it('retires the producer correlation before cancellation settles', async () => {
+    let resolveCancellation: (() => void) | undefined
+    chatOrchestratorMock.cancelTurn.mockImplementation(() => new Promise<void>((resolve) => {
+      resolveCancellation = resolve
+    }))
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamPeer = createContextChannel()
+    testChannels.push(streamPeer)
+    const context = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    await chatOrchestratorMock.emitBeforeSendHooks('ping', context)
+    void streamPeer.emitStreamCancel({ sessionId: 'session-1', turnId: 'turn-1' })
+    await vi.waitFor(() => expect(chatOrchestratorMock.cancelTurn).toHaveBeenCalledTimes(1))
+
+    await streamPeer.emitStreamCancel({ sessionId: 'session-1', turnId: 'turn-1' })
+    expect(chatOrchestratorMock.cancelTurn).toHaveBeenCalledTimes(1)
+
+    resolveCancellation?.()
+    await store.dispose()
+  })
+
+  it('clears a mirrored stream when another receiver cancels it', async () => {
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamPeer = createContextChannel()
+    testChannels.push(streamPeer)
+    const context = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    await streamPeer.emitStream({ type: 'before-send', message: 'ping', sessionId: 'session-1', context })
+    await vi.waitFor(() => expect(store.isReceivingRemoteStream).toBe(true))
+
+    await streamPeer.emitStreamCancel({ sessionId: 'session-1', turnId: 'turn-1' })
+
+    await vi.waitFor(() => expect(store.isReceivingRemoteStream).toBe(false))
+    expect(resetStreamMock).toHaveBeenCalledTimes(1)
+    expect(chatOrchestratorMock.cancelPendingSends).not.toHaveBeenCalled()
+    await store.dispose()
+  })
+
+  it('clears failed remote generation and rejects its late tokens', async () => {
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const peer = createContextChannel()
+    testChannels.push(peer)
+    const context = { sessionId: 'session-1', turnId: 'failed', message: { role: 'user', content: 'ping' }, contexts: {}, composedMessage: [] } satisfies ChatStreamEventContext
+    await peer.emitStream({ type: 'before-send', message: 'ping', sessionId: context.sessionId, context })
+    await peer.emitStream({ type: 'token-literal', literal: 'partial', sessionId: context.sessionId, context })
+    await vi.waitFor(() => expect(appendStreamLiteralMock).toHaveBeenCalledWith('partial'))
+    await peer.emitStreamFailed(context)
+    await vi.waitFor(() => expect(store.isReceivingRemoteStream).toBe(false))
+    await peer.emitStream({ type: 'token-literal', literal: 'late', sessionId: context.sessionId, context })
+    await waitForBroadcastDelivery()
+    expect(appendStreamLiteralMock).not.toHaveBeenCalledWith('late')
+    expect(resetStreamMock).toHaveBeenCalledOnce()
+  })
+
+  it('emits cancellation for the correlated remote turn', async () => {
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamPeer = createContextChannel()
+    testChannels.push(streamPeer)
+    const cancellations: Array<{ sessionId: string, turnId: string }> = []
+    streamPeer.onStreamCancel((command) => {
+      cancellations.push(command)
+    })
+    const context = {
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      message: { role: 'user', content: 'ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    await streamPeer.emitStream({ type: 'before-send', message: 'ping', sessionId: 'session-1', context })
+    await vi.waitFor(() => expect(store.isReceivingRemoteStream).toBe(true))
+
+    await store.cancelRemoteStream('session-1')
+
+    await vi.waitFor(() => {
+      expect(cancellations).toEqual([{ sessionId: 'session-1', turnId: 'turn-1' }])
+    })
+    expect(store.isReceivingRemoteStream).toBe(false)
+    expect(resetStreamMock).toHaveBeenCalledTimes(1)
+    await store.dispose()
+  })
+
   it('suppresses outbound broadcast while processing remote stream events', async () => {
     const outgoingStreamMessages = collectChannelMessages<{ sessionId: string }>(CHAT_STREAM_CHANNEL_NAME)
     const store = useContextBridgeStore()
@@ -596,6 +833,7 @@ describe('context bridge contract', () => {
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
 
     const context = {
+      sessionId: 'remote-session',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},
@@ -610,7 +848,8 @@ describe('context bridge contract', () => {
     streamSender.postMessage({ type: 'token-special', special: 'remote-special', sessionId: 'remote-session', context })
     await waitForBroadcastDelivery()
 
-    expect(outgoingStreamMessages.filter(message => message.sessionId === 'session-1')).toHaveLength(1)
+    // The sender and local hook each publish once. Remote handling must not echo the sender.
+    expect(outgoingStreamMessages.filter(message => message.sessionId === 'remote-session')).toHaveLength(2)
 
     await store.dispose()
   })
@@ -620,6 +859,7 @@ describe('context bridge contract', () => {
     const store = useContextBridgeStore()
     await store.initialize()
     const context = {
+      sessionId: 'session-a',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},
@@ -640,6 +880,7 @@ describe('context bridge contract', () => {
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
     const context = {
+      sessionId: 'session-1',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},
@@ -664,6 +905,7 @@ describe('context bridge contract', () => {
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
     const context = {
+      sessionId: 'session-1',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},
@@ -678,7 +920,7 @@ describe('context bridge contract', () => {
 
     expect(appendStreamLiteralMock).not.toHaveBeenCalledWith('foreign token')
     expect(store.isReceivingRemoteStream).toBe(true)
-    streamSender.postMessage({ type: 'stream-end', sessionId: 'session-1', context })
+    streamSender.postMessage({ type: 'assistant-end', message: 'done', sessionId: 'session-1', context })
     await vi.waitFor(() => expect(store.isReceivingRemoteStream).toBe(false))
     await store.dispose()
   })
@@ -688,6 +930,7 @@ describe('context bridge contract', () => {
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
     const context = {
+      sessionId: 'session-2',
       turnId: 'turn-2',
       message: { role: 'user', content: 'background ping' },
       contexts: {},
@@ -716,6 +959,7 @@ describe('context bridge contract', () => {
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
     const context = {
+      sessionId: 'session-1',
       turnId: 'turn-3',
       message: { role: 'user', content: 'background ping' },
       contexts: {},
@@ -750,6 +994,7 @@ describe('context bridge contract', () => {
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
     const context = {
+      sessionId: 'session-2',
       turnId: 'turn-4',
       message: { role: 'user', content: 'background ping' },
       contexts: {},
@@ -775,12 +1020,47 @@ describe('context bridge contract', () => {
     await store.dispose()
   })
 
+  // https://github.com/moeru-ai/airi/pull/2741#discussion_r4170050033
+  it('reports no live remote activity after a background response completes', async () => {
+    // ROOT CAUSE:
+    //
+    // `assistant-end` marks a background remote guard completed and keeps it for
+    // the later refresh. `remoteStreamSessionId` then names a finished response.
+    //
+    // After: `liveRemoteStreamSessionId` publishes the guard only while it is not
+    // completed, and has no value after `assistant-end`.
+    activeSessionIdRef.value = 'session-1'
+    const store = useContextBridgeStore()
+    await store.initialize()
+    const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
+    const context = {
+      sessionId: 'session-2',
+      turnId: 'turn-5',
+      message: { role: 'user', content: 'background ping' },
+      contexts: {},
+      composedMessage: [],
+    } satisfies ChatStreamEventContext
+
+    streamSender.postMessage({ type: 'before-send', message: 'background ping', sessionId: 'session-2', context })
+    await vi.waitFor(() => expect(store.liveRemoteStreamSessionId).toBe('session-2'))
+    // Each session keeps its own remote stream. The retained id names only the visible session's stream.
+    expect(store.remoteStreamSessionId).toBeUndefined()
+
+    streamSender.postMessage({ type: 'assistant-end', message: 'complete answer', sessionId: 'session-2', context })
+    await waitForBroadcastDelivery()
+
+    expect(store.liveRemoteStreamSessionId).toBeUndefined()
+
+    await store.dispose()
+  })
+
   it('ignores remote literal and end events when generation guard is stale', async () => {
     const store = useContextBridgeStore()
     await store.initialize()
     const streamSender = createTestChannel(CHAT_STREAM_CHANNEL_NAME)
 
     const context = {
+      sessionId: 'session-1',
       turnId: 'turn-1',
       message: { role: 'user', content: 'ping' },
       contexts: {},

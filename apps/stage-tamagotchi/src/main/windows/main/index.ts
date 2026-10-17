@@ -4,8 +4,11 @@ import type { InferOutput } from 'valibot'
 import type { I18n } from '../../libs/i18n'
 import type { ServerChannel } from '../../services/airi/channel-server'
 import type { GodotStageManager } from '../../services/airi/godot-stage'
-import type { McpStdioManager } from '../../services/airi/mcp-servers'
+import type { IOTraceRecordingService } from '../../services/airi/io-trace-recording'
+import type { McpManager } from '../../services/airi/mcp-servers'
 import type { AutoUpdater } from '../../services/electron/auto-updater'
+import type { GlobalShortcutService } from '../../services/electron/global-shortcut'
+import type { ChatWindowManager } from '../chat'
 import type { EditorWindowManager } from '../editor'
 import type { NoticeWindowManager } from '../notice'
 import type { OnboardingWindowManager } from '../onboarding'
@@ -50,16 +53,19 @@ type AppConfig = InferOutput<typeof appConfigSchema>
 export async function setupMainWindow(params: {
   editorWindow: EditorWindowManager
   settingsWindow: SettingsWindowManager
-  chatWindow: () => Promise<BrowserWindow>
+  chatWindow: ChatWindowManager
   widgetsManager: WidgetsWindowManager
   noticeWindow: NoticeWindowManager
   autoUpdater: AutoUpdater
   onWindowCreated?: (window: BrowserWindow) => void
   serverChannel: ServerChannel
   godotStageManager: GodotStageManager
-  mcpStdioManager: McpStdioManager
+  mcpManager: McpManager
   i18n: I18n
   onboardingWindowManager: OnboardingWindowManager
+  ioTraceRecording: IOTraceRecordingService
+  globalShortcut: GlobalShortcutService
+  inlayWindow: () => Promise<BrowserWindow>
 }) {
   const {
     setup: setupConfig,
@@ -181,14 +187,24 @@ export async function setupMainWindow(params: {
     autoUpdater: params.autoUpdater,
     serverChannel: params.serverChannel,
     godotStageManager: params.godotStageManager,
-    mcpStdioManager: params.mcpStdioManager,
+    mcpManager: params.mcpManager,
     i18n: params.i18n,
     onboardingWindowManager: params.onboardingWindowManager,
+    ioTraceRecording: params.ioTraceRecording,
+    inlayWindow: params.inlayWindow,
+    globalShortcut: params.globalShortcut,
   })
 
   await load(window, withHashRoute(baseUrl(resolve(getElectronMainDirname(), '..', 'renderer')), '/', {
     query: { 'synced-leader': 'true' },
   }))
+
+  // The inlay loads once and stays shown, so the first speech does not wait for a window and a page load.
+  // It is transparent and click-through until speech starts. Showing it inactive keeps focus in the main window.
+  void params.inlayWindow().then((inlay) => {
+    if (!inlay.isDestroyed())
+      inlay.showInactive()
+  }).catch(error => console.error('Failed to prepare the inlay window', error))
 
   /**
    * This is a know issue (or expected behavior maybe) to Electron.
