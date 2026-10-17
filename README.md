@@ -66,7 +66,7 @@ Or start the browser application:
 pnpm dev:web
 ```
 
-These commands start the application. Configure and start the model, transcription, and speech services separately.
+The `pnpm dev:*` commands start only the application. The Windows launcher also starts the prepared model services.
 Existing character cards store provider choices. Change the active card as well as the global provider.
 Machine-specific paths in the local service guides describe the tested installation.
 

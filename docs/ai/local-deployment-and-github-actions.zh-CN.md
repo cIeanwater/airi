@@ -30,6 +30,25 @@ GitHub 的部署记录也不是本地服务运行状态。
 正常 CI 的构建、类型检查、lint 和单元测试继续运行。
 它们没有被改成跳过，以免掩盖代码错误。
 
+## 后续完整 CI 检查
+
+首个修复提交 `832bec1c501e72dbbc75db078bb71e4239fc5b16` 的[完整 CI](https://github.com/cIeanwater/airi/actions/runs/39039327880)中：
+
+- Web、Electron 等全部构建、类型检查、lint 与来源检查通过。
+- 独立的 [Linux 桌面端到端测试](https://github.com/cIeanwater/airi/actions/runs/39039328034)通过。
+- 根单元测试 2,928 项通过，原来的账务时间测试已恢复；桌面浏览器 165 项与 Web 浏览器 1 项通过。
+- 设置页七个文件因缺少 `virtual:airi-transformers` 资源解析插件而未能加载，后续阶段因此尚未运行。
+
+已为独立设置页 Vitest 入口接入与正式应用相同的 Transformers.js 资源插件。
+完整设置页 12 文件、37 项测试在真实 Edge 中通过，没有模拟 VAD 或跳过断言。
+
+继续执行此前未到达的共享 UI 测试时，一并补齐默认角色新接口的旧测试 fixture。
+Provider 缓存回归使用真实回环 HTTP 服务验证新旧凭证，避免访问外网；语言默认值改在真实浏览器存储中分别验证中文和英文。
+Windows 下 UnoCSS 的文件 glob 归一化为正斜杠，恢复测试样式采集。
+触控目标最少 44 px 和长列表滚动的断言均保留，组件布局没有为通过测试而修改。
+
+完整验证记录见[本地轻量伴侣验收](validation/2026-10-17-fast-local-companion.zh-CN.md)。
+
 Fork 中的四个 Crowdin 任务默认跳过。
 只有 `ENABLE_CROWDIN_SYNC=true` 才会启用 Fork 的翻译同步。
 上游仓库保留其原有自动翻译行为。

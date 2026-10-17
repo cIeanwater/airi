@@ -7,7 +7,7 @@ import VueRouter from 'vue-router/vite'
 
 import { playwright } from '@vitest/browser-playwright'
 import { mergeConfigs } from 'unocss'
-import { loadEnv } from 'vite'
+import { loadEnv, normalizePath } from 'vite'
 import { defineConfig } from 'vitest/config'
 
 import { sharedUnoConfig } from '../../uno.config'
@@ -44,11 +44,12 @@ export default defineConfig({
       configFile: false,
       // Vitest loads components after the stylesheet. Scan their source before
       // the initial CSS response instead of relying on Vite's HMR updates.
+      // File globs require forward slashes on Windows.
       content: {
         filesystem: [
           `${import.meta.dirname}/src/**/*.vue`,
           `${import.meta.dirname}/../ui/src/**/*.vue`,
-        ],
+        ].map(normalizePath),
       },
     }])),
   ],

@@ -1,5 +1,7 @@
 import type { Session, User } from 'better-auth'
 
+import { createServer } from 'node:http'
+
 import { isGenerationProvider } from '@proj-airi/provider-inference'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -316,11 +318,28 @@ describe('provider store synchronization boundary', () => {
     // Login merge replaced the persisted OpenAI key and left providerInstanceCache
     // holding a client built from the previous key. Later chat returned that
     // client until reload.
+    // The replica merge validates /models. Keep that real HTTP boundary local
+    // so dummy credentials never trigger an external API request.
+    const credentials: Array<string | undefined> = []
+    const server = createServer((request, response) => {
+      credentials.push(request.headers.authorization)
+      response.setHeader('Content-Type', 'application/json')
+      if (request.url !== '/v1/models') {
+        response.writeHead(404).end('{}')
+        return
+      }
+      response.end(JSON.stringify({ object: 'list', data: [{ id: 'gpt-5.1', object: 'model' }] }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string')
+      throw new Error('The provider fixture requires a loopback TCP port.')
+    const baseUrl = `http://127.0.0.1:${address.port}/v1/`
     const store = useProviderStore()
     const configStore = useProviderConfigStore()
     const openaiConfig = {
       apiKey: 'sk-old',
-      baseUrl: 'https://api.openai.com/v1/',
+      baseUrl,
     }
     configStore.ensureProvider('openai', 'openai', openaiConfig)
     const first = await store.getProviderInstance('openai')
@@ -333,7 +352,7 @@ describe('provider store synchronization boundary', () => {
       restore()
       restore = stubOpenAiReplica({
         apiKey: 'sk-new',
-        baseUrl: 'https://api.openai.com/v1/',
+        baseUrl,
       })
       await configStore.syncProviders()
 
@@ -341,11 +360,17 @@ describe('provider store synchronization boundary', () => {
       expect(second).not.toBe(first)
       expect(configStore.providers.openai?.config).toEqual({
         apiKey: 'sk-new',
-        baseUrl: 'https://api.openai.com/v1/',
+        baseUrl,
       })
+      expect(credentials).toContain('Bearer sk-old')
+      expect(credentials).toContain('Bearer sk-new')
     }
     finally {
       restore()
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections()
+      })
     }
   })
 
