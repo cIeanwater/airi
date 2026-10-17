@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth'
 import { authClient } from './auth-client'
 import { OIDC_CLIENT_ID, OIDC_REDIRECT_URI } from './auth-config'
 import { buildAuthorizationURL, consumeFlowState, exchangeCodeForTokens, persistFlowState } from './auth-oidc'
+import { isLocalMode } from './deployment'
 
 export type OAuthProvider = 'google' | 'github' | 'steam'
 
@@ -102,6 +103,8 @@ export const browserAuthorizationHandler: AuthorizationHandler = async ({ author
  * The function returns false when the URL is not an OIDC callback.
  */
 export async function completeOIDCSignIn(callbackUrl: string): Promise<boolean> {
+  if (isLocalMode())
+    return false
   const url = new URL(callbackUrl)
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
@@ -122,6 +125,8 @@ export async function completeOIDCSignIn(callbackUrl: string): Promise<boolean> 
  * Builds the authorization URL, persists PKCE state, and navigates.
  */
 export async function signInOIDC(params: OIDCFlowParams) {
+  if (isLocalMode())
+    return
   const handler = authorizationHandler
   if (!handler)
     throw new Error('No authorization handler is registered for this app runtime.')
@@ -159,6 +164,8 @@ export async function signInOIDC(params: OIDCFlowParams) {
  * (ui-server-auth) where the user can choose email/password or social.
  */
 export async function triggerSignIn(opts?: { provider?: OAuthProvider }): Promise<void> {
+  if (isLocalMode())
+    return
   signingIn.value = true
   try {
     await signInOIDC({

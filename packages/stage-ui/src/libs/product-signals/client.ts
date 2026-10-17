@@ -2,6 +2,8 @@ import type { AboutBuildInfo } from '../../components/scenarios/about/types'
 
 import { isEnvTruthy } from '@proj-airi/stage-shared'
 
+import { isLocalMode } from '../deployment'
+
 export interface AnalyticsIdentitySnapshot {
   /** Current provider distinct id for the browser, device, or user. */
   distinctId: string
@@ -186,7 +188,7 @@ export function configureAnalyticsAdapter(loader: AnalyticsAdapterLoader): void 
 }
 
 export function isAnalyticsAvailableInBuild(): boolean {
-  return isEnvTruthy(import.meta.env.VITE_ENABLE_ANALYTICS)
+  return !isLocalMode() && isEnvTruthy(import.meta.env.VITE_ENABLE_ANALYTICS)
 }
 
 export function enableAnalyticsCapture(): boolean {

@@ -47,7 +47,19 @@ it('replicates the audio endpoint without a follower snapshot proposal', async (
   await vi.waitFor(() => expect(settings.runtime.getLeaderId()).toBe(stage.runtime.participantId))
   const traffic = vi.spyOn(BroadcastChannel.prototype, 'postMessage')
   stage.store.endJudgeAudioEndpoint = 'http://127.0.0.1:18085/v1/turn'
+  stage.store.endJudgeMaxSilenceMs = 2000
   await vi.waitFor(() => expect(settings.store.endJudgeAudioEndpoint).toBe(stage.store.endJudgeAudioEndpoint))
+  await vi.waitFor(() => expect(settings.store.endJudgeMaxSilenceMs).toBe(2000))
   await new Promise(resolve => setTimeout(resolve, 50))
   expect(traffic).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'onCall', rest: expect.arrayContaining(['replaceState']) }))
+})
+
+it('defaults to direct transcription without a second chat-model request', async () => {
+  const stage = createWindow(`hearing-default-${crypto.randomUUID()}`, 'leader-only')
+  await vi.waitFor(() => expect(stage.runtime.isLeader()).toBe(true))
+  expect(stage.store.rephraseEnabled).toBe(false)
+  expect(stage.store.endJudgeMaxSilenceMs).toBe(6000)
+  stage.store.rephraseEnabled = true
+  stage.store.resetState()
+  expect(stage.store.rephraseEnabled).toBe(false)
 })

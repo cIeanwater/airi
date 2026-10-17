@@ -89,7 +89,7 @@ it('never judges silence before speech and retains no more than eight seconds', 
   await harness.controller.close()
 })
 
-it('uses the six-second activity safety limit when audio semantics report an incomplete turn', async () => {
+it.each([2000, 6000])('uses the configured %i ms activity safety limit for an incomplete turn', async (silenceMs) => {
   const source = createPushStream<PcmBlock>()
   const audio = new AudioInput({ live: true, open: () => source.stream }, { historyMs: 360 })
   const controller = new VoiceController({ audio, transcriber: () => ({ transcribe: request => new ReadableStream({ async start(output) {
@@ -105,7 +105,7 @@ it('uses the six-second activity safety limit when audio semantics report an inc
   controller.use(createVoiceActivityPlugin({
     detect: async window => window.channels[0][0],
     target: () => ({ sessionId: 'synthetic', interruptTurns: [] }),
-    silenceMs: 6000,
+    silenceMs,
   }), { grants: ['input-control', 'cancel-input'] })
   let frame = 0
   async function hear(speech: boolean, duration: number) {
@@ -119,9 +119,15 @@ it('uses the six-second activity safety limit when audio semantics report an inc
   await hear(true, 320)
   await expect.poll(() => controller.activeInput?.state.phase).toBe('capturing')
   const attempt = controller.activeInput!
-  await hear(false, 5800)
+  await hear(false, silenceMs - 200)
   expect(attempt.state.phase).toBe('capturing')
   expect(judge).toHaveBeenCalledOnce()
+  if (silenceMs === 2000) {
+    await hear(true, 320)
+    await hear(false, 1800)
+    expect(attempt.state.phase).toBe('capturing')
+    expect(judge).toHaveBeenCalledTimes(2)
+  }
   await hear(false, 320)
   await expect.poll(() => attempt.state.phase).not.toBe('capturing')
   await controller.close()

@@ -254,7 +254,7 @@ export default defineConfig({
         exclude: ['**/components/**'],
       }),
 
-      VitePluginVueDevTools(),
+      ...(env.AIRI_VUE_DEVTOOLS === 'true' ? [VitePluginVueDevTools()] : []),
 
       // https://github.com/JohnCampionJr/vite-plugin-vue-layouts
       Layouts({

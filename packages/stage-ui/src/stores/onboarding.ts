@@ -3,6 +3,7 @@ import type {} from 'pinia-plugin-synced'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
+import { isLocalMode } from '../libs/deployment'
 import { useAuthStore } from './auth'
 import { useProviderConfigStore } from './providers/config'
 
@@ -122,7 +123,8 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   // Check if first-time setup should be shown
   const skipOnboardingPath = ['/auth/callback']
   const needsOnboarding = computed(() =>
-    !authStore.isAuthenticated
+    !isLocalMode()
+    && !authStore.isAuthenticated
     && !authStore.token
     && !hasSkippedSetup.value
     && !hasCompletedSetup.value

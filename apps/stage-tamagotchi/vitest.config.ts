@@ -43,7 +43,7 @@ export default defineConfig({
     }),
   ],
   test: {
-    env: loadEnv('test', cwd(), ''),
+    env: { ...loadEnv('test', cwd(), ''), VITE_AIRI_LOCAL_MODE: 'false' },
     projects: [
       {
         extends: true,

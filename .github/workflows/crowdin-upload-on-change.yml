@@ -24,12 +24,23 @@ jobs:
   upload-translations-to-crowdin:
     # The merge of the Crowdin pull request changes the same files. Its content came from
     # Crowdin, so an upload would only send it back.
-    if: "${{ !startsWith(github.event.head_commit.message, 'chore(i18n): update translations') }}"
+    if: "${{ (github.repository == 'moeru-ai/airi' || vars.ENABLE_CROWDIN_SYNC == 'true') && !startsWith(github.event.head_commit.message, 'chore(i18n): update translations') }}"
     runs-on: ubuntu-latest
     steps:
+      - name: Check Crowdin configuration
+        env:
+          CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+          CROWDIN_PROJECT_ID: ${{ vars.CROWDIN_PROJECT_ID }}
+        run: |
+          test -n "$CROWDIN_PERSONAL_TOKEN" || { echo '::error::Set your CROWDIN_PERSONAL_TOKEN secret before syncing.'; exit 1; }
+          if [[ "$GITHUB_REPOSITORY" != 'moeru-ai/airi' ]] && ! [[ "$CROWDIN_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+            echo '::error::Set CROWDIN_PROJECT_ID to your own project before enabling fork translation sync.'
+            exit 1
+          fi
       - uses: actions/checkout@v7
       - uses: crowdin/github-action@v3
         with:
+          project_id: ${{ vars.CROWDIN_PROJECT_ID }}
           # A change can add an English key together with its translation. Crowdin ignores a
           # translation for a string it does not have, so the sources go first.
           upload_sources: true

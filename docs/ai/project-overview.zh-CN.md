@@ -19,9 +19,9 @@ Humanning 是基于 [moeru-ai/AIRI](https://github.com/moeru-ai/airi) 的本地�
 
 当前本地 Qwen 服务接收文本，不提供原生音频输入。
 转写、回合判断、文本生成和语音合成是可分别替换的服务边界。
-当前本机已启用 Smart Turn v3.2 与 Qwen3-TTS-1.7B CustomVoice，默认 Serena 声线。
-自动发送、新语音实际播放及 ACT 语气接线已通过[完整闭环验收](validation/2026-10-17-modern-voice.zh-CN.md)。
-当前完整 WAV 合成仍慢于播放速度，输入模型也存在误判。具体限制见两份研究报告。
+当前本机采用约 60 MB 的中英双语流式 Zipformer、Smart Turn v3.2 与 MOSS-TTS-Nano ONNX，默认 Xiaoyu 女声。
+语音组件使用 CPU，Qwen3.5-2B BF16 使用 GPU。转写后改写默认关闭，合成音频逐块播放。
+Nano 不支持情绪指令，ACT 控制人物表情；音尾判断与转写仍存在误判。配置、实测和取舍见[轻量语音研究](research/2026-10-17-fast-local-voice.zh-CN.md)。
 
 ## 三类记录
 
@@ -58,6 +58,7 @@ Humanning 是基于 [moeru-ai/AIRI](https://github.com/moeru-ai/airi) 的本地�
 ## 部署边界
 
 当前验证重点是 Windows 本地桌面环境。
+已准备的本机环境可双击 `Start-Humanning.cmd` 启动。默认本地模式关闭登录、账号同步和官方托管服务。
 源码继续包含上游的浏览器与移动端应用，但本仓库的本地服务验收不代表全平台验收。
 
 模型权重与运行环境单独准备，真实消息与浏览器配置保存在 Git 仓库之外。

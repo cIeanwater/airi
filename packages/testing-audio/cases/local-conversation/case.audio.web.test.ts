@@ -5,12 +5,12 @@ import { configureModuleConsciousness, configureModuleHearing, configureModuleSp
 import { configureStorage } from '../shared/configurations/storage'
 import { openaiAsr, openaiLlm, openaiTts } from '../shared/providers'
 
-function requireLoopbackUrl(value: string | undefined, name: string) {
+function requireLoopbackUrl(value: string | undefined, name: string, protocols = ['http:', 'https:']) {
   if (!value)
     throw new Error(`Set ${name} for the local conversation case.`)
   const url = new URL(value)
-  if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
-    throw new Error(`${name} requires a loopback HTTP endpoint.`)
+  if (!protocols.includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
+    throw new Error(`${name} requires a loopback endpoint.`)
   return value
 }
 
@@ -31,7 +31,9 @@ describe('local automatic voice conversation', () => {
           provider: 'openai-compatible-audio-transcription',
         })
         provider.config.language = 'en'
-        return { provider, captureFormat: 'wav', autoSend: true, microphoneEnabled: true }
+        if (env.TESTING_AUDIO_LOCAL_ASR_STREAM_URL)
+          provider.config.localStreamingUrl = requireLoopbackUrl(env.TESTING_AUDIO_LOCAL_ASR_STREAM_URL, 'TESTING_AUDIO_LOCAL_ASR_STREAM_URL', ['ws:', 'wss:'])
+        return { provider, captureFormat: env.TESTING_AUDIO_LOCAL_ASR_STREAM_URL ? 'pcm' : 'wav', autoSend: true, microphoneEnabled: true }
       }),
       configureModuleConsciousness(({ env }) => ({
         provider: openaiLlm({
@@ -50,8 +52,9 @@ describe('local automatic voice conversation', () => {
       })),
       async ({ runtime, env }) => configureStorage(runtime, {
         'settings/hearing/auto-send-delay': '2000',
-        'settings/hearing/rephrase-enabled': 'true',
+        'settings/hearing/rephrase-enabled': env.TESTING_AUDIO_LOCAL_REPHRASE === '1' ? 'true' : 'false',
         'settings/hearing/end-judge-enabled': 'true',
+        'settings/hearing/end-judge-max-silence-ms': '2000',
         'settings/hearing/end-judge-audio-endpoint': env.TESTING_AUDIO_LOCAL_TURN_ENDPOINT
           ? requireLoopbackUrl(env.TESTING_AUDIO_LOCAL_TURN_ENDPOINT, 'TESTING_AUDIO_LOCAL_TURN_ENDPOINT')
           : '',
@@ -62,7 +65,9 @@ describe('local automatic voice conversation', () => {
   }, async ({ audio }) => {
     await audio.waitForVoiceInput({ timeout: 90_000 })
     await expect(audio).toHaveCapturedTranscriptionAudio({ count: 1, minimumBytes: 8000 })
-    await expect(audio).toHaveTranscriptions([['Please say hello.', 'Say hello.']], { match: 'contains' })
+    await expect(audio).toHaveTranscriptions([['Please say hello.', 'Say hello.', 'PLEASE SAY HELLO']], { match: 'contains' })
+    if (audio.transcriptionCaptureFormat === 'pcm')
+      expect((await audio.streamingTranscriptionUpdates()).length).toBeGreaterThan(0)
 
     const turn = await audio.waitForTurn({ timeout: 90_000 })
     expect(turn.chat.messages.map(message => message.role)).toEqual(['user', 'assistant'])
@@ -87,5 +92,17 @@ describe('local automatic voice conversation', () => {
       expect(span.attributes[IOAttributes.TTSCanceled]).not.toBe(true)
       expect(Number(span.endTimeNano) - Number(span.startTimeNano)).toBeGreaterThan(100_000_000)
     }
+    const spans = await audio.completedSpans()
+    const llm = spans.find(span => span.name === IOSpanNames.LLMInference && span.attributes[IOAttributes.TurnId] === turn.id)
+    const recognition = spans.findLast(span => span.name === IOSpanNames.SpeechRecognition)
+    const firstPlayback = playback.toSorted((left, right) => Number(left.startTimeNano) - Number(right.startTimeNano))[0]
+    console.info('local_voice_metrics', JSON.stringify({
+      turnId: turn.id,
+      llmMs: llm ? (Number(llm.endTimeNano) - Number(llm.startTimeNano)) / 1e6 : undefined,
+      finalTranscriptToFirstPlaybackMs: recognition && firstPlayback ? (Number(firstPlayback.startTimeNano) - Number(recognition.endTimeNano)) / 1e6 : undefined,
+      llmRequestToFirstPlaybackMs: llm && firstPlayback ? (Number(firstPlayback.startTimeNano) - Number(llm.startTimeNano)) / 1e6 : undefined,
+      audioMs: turn.tts.audioSegments.reduce((total, segment) => total + segment.durationMs, 0),
+      playedClips: playback.length,
+    }))
   })
 })

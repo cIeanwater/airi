@@ -8,12 +8,25 @@ permissions:
 
 jobs:
   upload-glossary:
+    if: ${{ github.repository == 'moeru-ai/airi' || vars.ENABLE_CROWDIN_SYNC == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check Crowdin configuration
+        env:
+          CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+          CROWDIN_PROJECT_ID: ${{ vars.CROWDIN_PROJECT_ID }}
+        run: |
+          test -n "$CROWDIN_PERSONAL_TOKEN" || { echo '::error::Set your CROWDIN_PERSONAL_TOKEN secret before syncing.'; exit 1; }
+          if [[ "$GITHUB_REPOSITORY" != 'moeru-ai/airi' ]] && ! [[ "$CROWDIN_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+            echo '::error::Set CROWDIN_PROJECT_ID to your own project before enabling fork translation sync.'
+            exit 1
+          fi
       # An empty ID fails inside the CLI with an unclear message. Fail here instead.
       - name: Check Glossary ID
+        env:
+          GLOSSARY_ID: ${{ vars.CROWDIN_GLOSSARY_ID }}
         run: |
-          if [ -z "${{ vars.CROWDIN_GLOSSARY_ID }}" ]; then
+          if ! [[ "$GLOSSARY_ID" =~ ^[0-9]+$ ]]; then
             echo "::error::Set the CROWDIN_GLOSSARY_ID repository variable. To find the ID, run: crowdin glossary list"
             exit 1
           fi
@@ -39,6 +52,7 @@ jobs:
       - name: Upload Glossary
         uses: crowdin/github-action@v2
         with:
+          project_id: ${{ vars.CROWDIN_PROJECT_ID }}
           command: glossary upload
           command_args: packages/i18n/glossary/glossary.tbx --id=${{ vars.CROWDIN_GLOSSARY_ID }}
         env:

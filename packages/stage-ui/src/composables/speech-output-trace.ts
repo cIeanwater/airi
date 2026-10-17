@@ -1,5 +1,6 @@
 import type { Span } from '@opentelemetry/api'
 import type { SpeechAudio, SpeechOutput, TurnRef } from '@proj-airi/core-agent'
+import type { PcmBlock } from '@proj-airi/pipelines-audio'
 
 import { errorMessageFrom } from '@moeru/std'
 import { SpanStatusCode } from '@opentelemetry/api'
@@ -103,17 +104,55 @@ export function traceSpeechOutput(turn: TurnRef, output: SpeechOutput, decode: (
   async function stream(streamAudio: Extract<SpeechOutput, { stream: unknown }>['stream'], ...[text, signal]: Parameters<typeof streamAudio>) {
     const span = start(IOSpanNames.TTSSynthesis, { [IOAttributes.Subsystem]: IOSubsystems.TTS })
     let spoken = ''
+    let durationMs = 0
+    let pendingMeasurements = 0
+    let synthesizedAt: number | undefined
+
+    function finishMeasurements() {
+      if (synthesizedAt === undefined || pendingMeasurements > 0 || !open.has(span))
+        return
+      span.setAttribute(IOAttributes.TTSAudioDurationMs, durationMs)
+      finish(span, synthesizedAt)
+    }
+
+    function measure(part: SpeechAudio): SpeechAudio {
+      pendingMeasurements += 1
+      if (part.audio instanceof Blob) {
+        void decode(part.audio)
+          .then(buffer => durationMs += buffer.duration * 1000)
+          .catch(cause => console.warn('Could not measure synthesized speech duration', cause))
+          .finally(() => {
+            pendingMeasurements -= 1
+            finishMeasurements()
+          })
+        return part
+      }
+      return { ...part, audio: part.audio.pipeThrough(new TransformStream<PcmBlock, PcmBlock>({
+        transform(block, controller) {
+          durationMs += (block.range.endFrame - block.range.startFrame) * 1000 / block.sampleRate
+          controller.enqueue(block)
+        },
+        flush() {
+          pendingMeasurements -= 1
+          finishMeasurements()
+        },
+      })) }
+    }
+
     try {
       const audio = await streamAudio(text, signal)
       // Cancellation skips flush. The turn end closes this span in that case.
       return audio.pipeThrough(new TransformStream<SpeechAudio, SpeechAudio>({
         transform(part, controller) {
           spoken += part.text ?? ''
-          controller.enqueue(part)
+          controller.enqueue(measure(part))
         },
         flush() {
           span.setAttribute(IOAttributes.TTSText, spoken)
-          finish(span)
+          // PCM consumption and Blob decoding can finish after producer EOF.
+          // Keep the synthesis clock at EOF while waiting only for metadata.
+          synthesizedAt = Date.now()
+          finishMeasurements()
         },
       }))
     }

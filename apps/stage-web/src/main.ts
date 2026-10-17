@@ -10,6 +10,7 @@ import { isEnvTruthy } from '@proj-airi/stage-shared'
 import { pushToTalkTriggerKey } from '@proj-airi/stage-ui/composables/push-to-talk-trigger'
 import { trackButtonPlugin } from '@proj-airi/stage-ui/directives/track-button'
 import { browserAuthorizationHandler, registerAuthorizationHandler } from '@proj-airi/stage-ui/libs/auth'
+import { isHostedRoute, isLocalMode } from '@proj-airi/stage-ui/libs/deployment'
 import { piniaPluginTracing, setupSynced } from '@proj-airi/stage-ui/libs/pinia'
 import { configureAnalyticsAdapter } from '@proj-airi/stage-ui/libs/product-signals'
 import { useMediaQuery } from '@vueuse/core'
@@ -54,6 +55,8 @@ else
   router = createRouter({ routes: routeRecords, history: createWebHistory() })
 
 router.beforeEach((to, from) => {
+  if (isLocalMode() && isHostedRoute(to.path))
+    return { path: to.path.startsWith('/settings') ? '/settings' : '/', replace: true }
   if (to.path !== from.path)
     NProgress.start()
 })

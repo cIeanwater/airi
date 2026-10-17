@@ -8,6 +8,7 @@ import stageWebConfig from './vite.config'
 export default defineConfig({
   plugins: [Vue()],
   test: {
+    env: { VITE_AIRI_LOCAL_MODE: 'false' },
     projects: [
       {
         extends: true,
@@ -21,6 +22,7 @@ export default defineConfig({
       mergeConfig(stageWebConfig, defineConfig({
         test: {
           name: 'browser',
+          env: { VITE_AIRI_LOCAL_MODE: 'false' },
           include: ['src/**/*.browser.test.ts'],
           setupFiles: ['./src/test/setup-live2d.browser.ts'],
           browser: {

@@ -102,7 +102,7 @@ export function stubForBrowser(options: BrowserProbeOptions) {
 
   const OriginalWebSocket = window.WebSocket
   const audioChunksBySocket = new WeakMap<WebSocket, Uint8Array[]>()
-  const capturesAliyunNlsBySocket = new WeakMap<WebSocket, boolean>()
+  const transcriptionProtocolBySocket = new WeakMap<WebSocket, 'aliyun-nls' | 'local'>()
   const capturedSockets = new WeakSet<WebSocket>()
 
   function capturePcmAudio(socket: WebSocket) {
@@ -124,14 +124,23 @@ export function stubForBrowser(options: BrowserProbeOptions) {
     state.transcriptionAudio.push({ base64: audio.toBase64(), format: 'pcm' })
   }
 
-  class CaptureAliyunNlsWebSocket extends OriginalWebSocket {
+  class CaptureTranscriptionWebSocket extends OriginalWebSocket {
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols)
       const target = new URL(url.toString(), window.location.href)
       const capturesAliyunNls = target.hostname.startsWith('nls-gateway-') && target.hostname.endsWith('.aliyuncs.com')
-      capturesAliyunNlsBySocket.set(this, capturesAliyunNls)
+      const capturesLocal = ['ws:', 'wss:'].includes(target.protocol)
+        && ['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)
+        && !target.username && !target.password
+        && target.pathname === '/v1/stream'
+      let protocol: 'aliyun-nls' | 'local' | undefined
+      if (capturesAliyunNls)
+        protocol = 'aliyun-nls'
+      else if (capturesLocal)
+        protocol = 'local'
 
-      if (capturesAliyunNls) {
+      if (protocol) {
+        transcriptionProtocolBySocket.set(this, protocol)
         audioChunksBySocket.set(this, [])
         this.addEventListener('open', () => {
           state.streamingTranscriptionReady = true
@@ -141,12 +150,20 @@ export function stubForBrowser(options: BrowserProbeOptions) {
             return
 
           try {
-            const payload = JSON.parse(event.data) as { header?: { name?: string }, payload?: { result?: unknown } }
-            if (payload.header?.name === 'SentenceEnd' && typeof payload.payload?.result === 'string')
+            const payload = JSON.parse(event.data) as { type?: string, text?: unknown, header?: { name?: string }, payload?: { result?: unknown } }
+            if (protocol === 'local' && typeof payload.text === 'string') {
+              if (payload.type === 'partial')
+                state.streamingTranscriptionUpdates.push(payload.text)
+              if (payload.type === 'final') {
+                capturePcmAudio(this)
+                state.transcriptionResults.push(payload.text)
+              }
+            }
+            if (protocol === 'aliyun-nls' && payload.header?.name === 'SentenceEnd' && typeof payload.payload?.result === 'string')
               state.transcriptionResults.push(payload.payload.result)
           }
           catch {
-            // NLS can send non-transcription frames. The Provider handles those frames.
+            // Providers handle control frames that contain no transcription result.
           }
         })
       }
@@ -154,19 +171,33 @@ export function stubForBrowser(options: BrowserProbeOptions) {
 
     send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
       const audioChunks = audioChunksBySocket.get(this)
-      if (capturesAliyunNlsBySocket.get(this) && audioChunks && typeof data !== 'string') {
+      const protocol = transcriptionProtocolBySocket.get(this)
+      if (protocol && audioChunks && typeof data !== 'string') {
         if (data instanceof Blob) {
           void data.arrayBuffer().then((buffer) => {
             audioChunks.push(new Uint8Array(buffer))
+            if (protocol === 'aliyun-nls')
+              capturePcmAudio(this)
           })
         }
         else if (ArrayBuffer.isView(data)) {
-          audioChunks.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength))
+          audioChunks.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice())
         }
         else {
-          audioChunks.push(new Uint8Array(data))
+          audioChunks.push(new Uint8Array(data).slice())
         }
-        capturePcmAudio(this)
+        // Native streams finish after all PCM chunks. NLS captures once its minimum audio size arrives.
+        if (protocol === 'aliyun-nls')
+          capturePcmAudio(this)
+      }
+      if (protocol === 'local' && typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { type?: string }).type === 'finish')
+            capturePcmAudio(this)
+        }
+        catch {
+          // Invalid controls remain visible to the real Provider and service.
+        }
       }
 
       let outboundData: string | Blob | BufferSource
@@ -187,7 +218,7 @@ export function stubForBrowser(options: BrowserProbeOptions) {
 
     close(code?: number, reason?: string): void {
       const audioChunks = audioChunksBySocket.get(this)
-      if (capturesAliyunNlsBySocket.get(this) && audioChunks && !capturedSockets.has(this) && audioChunks.length) {
+      if (transcriptionProtocolBySocket.has(this) && audioChunks && !capturedSockets.has(this) && audioChunks.length) {
         capturePcmAudio(this)
       }
 
@@ -195,7 +226,7 @@ export function stubForBrowser(options: BrowserProbeOptions) {
     }
   }
 
-  window.WebSocket = CaptureAliyunNlsWebSocket
+  window.WebSocket = CaptureTranscriptionWebSocket
 
   const channel = new BroadcastChannel('io-tracer-channel')
 

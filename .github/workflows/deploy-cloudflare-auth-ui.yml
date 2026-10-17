@@ -1,11 +1,13 @@
 name: Cloudflare Pages (Auth UI)
 
 on:
-  push:
-    branches:
-      - 'main'
-
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: Deploy your optional hosted account interface
+        required: true
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,6 +15,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ inputs.confirm && vars.ENABLE_HOSTED_DEPLOYMENTS == 'true' }}
     name: Deploy - ui-server-auth
     runs-on: ubuntu-latest
     permissions:
@@ -21,9 +24,27 @@ jobs:
 
     environment:
       name: Auth Production
-      url: https://accounts.airi.build/ui/
+      url: ${{ vars.AUTH_UI_URL }}
 
     steps:
+      - name: Check deployment configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: ${{ vars.CLOUDFLARE_AUTH_PROJECT }}
+          AUTH_UI_URL: ${{ vars.AUTH_UI_URL }}
+          WEB_APP_URL: ${{ vars.VITE_WEB_APP_URL }}
+          SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::Set your CLOUDFLARE_API_TOKEN secret before deploying.'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::Set your CLOUDFLARE_ACCOUNT_ID secret before deploying.'; exit 1; }
+          [[ "$PAGES_PROJECT" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || { echo '::error::Set a valid CLOUDFLARE_AUTH_PROJECT variable for your own Pages project.'; exit 1; }
+          node --input-type=module <<'NODE'
+          for (const name of ['AUTH_UI_URL', 'WEB_APP_URL', 'SERVER_URL']) {
+            if (new URL(process.env[name]).protocol !== 'https:')
+              throw new Error(`${name} must use HTTPS`)
+          }
+          NODE
       - uses: actions/checkout@v6
       # Turborepo
       - name: Cache turbo build setup
@@ -49,13 +70,14 @@ jobs:
       - name: Build ui-server-auth
         run: pnpm -F @proj-airi/ui-server-auth run build
         env:
-          VITE_ENABLE_ANALYTICS: 'true'
-          VITE_SERVER_URL: 'https://api.airi.build'
-          VITE_WEB_APP_URL: 'https://airi.moeru.ai/'
+          VITE_AIRI_LOCAL_MODE: 'false'
+          VITE_ENABLE_ANALYTICS: 'false'
+          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+          VITE_WEB_APP_URL: ${{ vars.VITE_WEB_APP_URL }}
 
       - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy ./apps/ui-server-auth/dist --project-name=airi-accounts-ui --branch=main
+          command: pages deploy ./apps/ui-server-auth/dist --project-name=${{ vars.CLOUDFLARE_AUTH_PROJECT }} --branch=main
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}

@@ -182,20 +182,35 @@ describe('revenuecat routes', () => {
     expect(await readWallet('user-1')).toMatchObject({ capacitorFlux: 1500, capacitorQuota: 2000 })
   })
 
+  // https://github.com/cIeanwater/airi/actions/runs/39008851605/job/117326822401
+  // ROOT CAUSE:
+  // The real clock eventually passed both fixture purchases. The first refill
+  // then occurred after the upgrade boundary. Advance the test clock between
+  // purchases so the scenario keeps its intended event order on every date.
   it('grants the new capacitor on PRODUCT_CHANGE and not the old product in the event', async () => {
-    const { app } = await setup()
-    entitlements['user-1'] = [goEntitlement]
-    await postWebhook(app, webhookBody())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(goEntitlement.purchasedAt)
+    try {
+      const { app } = await setup()
+      const accessUntil = new Date('2026-11-01T00:00:00.000Z')
+      entitlements['user-1'] = [{ ...goEntitlement, accessUntil }]
+      await postWebhook(app, webhookBody())
 
-    entitlements['user-1'] = [{
-      entitlementId: 'airi_plus',
-      productId: 'rc_plus_monthly',
-      purchasedAt: new Date('2026-10-15T00:00:00.000Z'),
-      accessUntil: goEntitlement.accessUntil,
-    }]
-    await postWebhook(app, webhookBody({ id: 'sub-event-2', type: 'PRODUCT_CHANGE', product_id: 'rc_go_monthly' }))
+      const purchasedAt = new Date('2026-10-15T00:00:00.000Z')
+      vi.setSystemTime(purchasedAt)
+      entitlements['user-1'] = [{
+        entitlementId: 'airi_plus',
+        productId: 'rc_plus_monthly',
+        purchasedAt,
+        accessUntil,
+      }]
+      await postWebhook(app, webhookBody({ id: 'sub-event-2', type: 'PRODUCT_CHANGE', product_id: 'rc_go_monthly' }))
 
-    expect(await readWallet('user-1')).toMatchObject({ capacitorFlux: 5000, capacitorQuota: 5000 })
+      expect(await readWallet('user-1')).toMatchObject({ capacitorFlux: 5000, capacitorQuota: 5000 })
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   it('expires the capacitor when RevenueCat reports no active capacitor', async () => {
