@@ -8,6 +8,14 @@ on:
       - Start-Humanning.cmd
       - scripts/start-local-voice.py
       - scripts/test-local-voice-launcher.py
+      - scripts/serve-local-gemma.py
+      - scripts/test-local-gemma-gateway.py
+      - scripts/serve-local-gpt-sovits.py
+      - scripts/test-local-gpt-sovits.py
+      - scripts/serve-qwen35-2b-bf16.py
+      - scripts/test-local-chat-output.py
+      - scripts/local-message-context.py
+      - scripts/test-local-message-context.py
       - .github/workflows/test-local-launcher.yml
   pull_request:
     branches:
@@ -16,6 +24,14 @@ on:
       - Start-Humanning.cmd
       - scripts/start-local-voice.py
       - scripts/test-local-voice-launcher.py
+      - scripts/serve-local-gemma.py
+      - scripts/test-local-gemma-gateway.py
+      - scripts/serve-local-gpt-sovits.py
+      - scripts/test-local-gpt-sovits.py
+      - scripts/serve-qwen35-2b-bf16.py
+      - scripts/test-local-chat-output.py
+      - scripts/local-message-context.py
+      - scripts/test-local-message-context.py
       - .github/workflows/test-local-launcher.yml
   workflow_dispatch:
 
@@ -37,3 +53,13 @@ jobs:
           python-version: '3.12'
       - name: Run launcher regressions
         run: python -B scripts/test-local-voice-launcher.py -v
+      - name: Run local protocol regressions without model weights
+        run: |
+          python -B scripts/test-local-chat-output.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B scripts/test-local-message-context.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B scripts/test-local-gemma-gateway.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B scripts/test-local-gpt-sovits.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

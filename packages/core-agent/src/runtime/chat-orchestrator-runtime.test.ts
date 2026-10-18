@@ -172,6 +172,16 @@ function createHarness(getActiveProvider = () => 'mock-provider') {
 }
 
 describe('createChatOrchestratorRuntime', () => {
+  it('correlates each model request with its durable assistant message and source user turn', async () => {
+    const harness = createHarness()
+    await harness.runtime.ingest('Inspect this response', { model: 'test', chatProvider: provider })
+    const messages = harness.sessionMessages['session-1']
+    const correlation = harness.stream.mock.calls[0][3]?.requestCorrelation
+    expect(correlation?.conversationId).toBe('session-1')
+    expect(correlation?.messageId).toBe(messages.find(message => message.role === 'assistant')?.id)
+    expect(correlation?.turnId).toBe(messages.find(message => message.role === 'user')?.id)
+  })
+
   it('reports a successful round only after the assistant storage write completes', async () => {
     // ROOT CAUSE:
     //

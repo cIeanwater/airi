@@ -217,3 +217,121 @@ it('keeps speech across short pauses and captures the next message while batch t
   expect(captured[1].filter(value => value === 1)).toHaveLength(320)
   await controller.close()
 })
+
+// ROOT CAUSE:
+// A single positive VAD frame stopped a response before the input's minimum speech check could reject noise.
+// Continuous speech now confirms interruption before capture opens, while pre-roll preserves the first phoneme.
+it.each(['generating', 'playing'] as const)('confirms sustained speech before interrupting a %s response and preserves its onset', async (stage) => {
+  const frames = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => frames.stream }, { historyMs: 360 })
+  const synthesis = Promise.withResolvers<Blob>()
+  const stopped = vi.fn(async () => ({ throughMs: 20 }))
+  const played = vi.fn(() => ({ done: new Promise<{ throughMs: number }>(() => {}), stop: stopped }))
+  const playback = new Playback({ nowMs: () => 0, play: played })
+  const synthesized = vi.fn(async () => stage === 'generating' ? synthesis.promise : new Blob(['Synthetic speech']))
+  const received: number[] = []
+  const submitted = vi.fn(async (_submission: SpeechSubmission) => ({ status: 'committed' as const, messageId: 'interruption' }))
+  const controller = new VoiceController({ audio, speech: () => ({ playback, synthesize: synthesized }), recordInterruption: async () => ({ status: 'queued' }), submit: submitted, transcriber: () => ({ transcribe: request => new ReadableStream<TranscriptionEvent>({ async start(output) {
+    for await (const block of request.audio)
+      received.push(...block.channels[0])
+    output.enqueue({ type: 'update', revision: 1, segments: [{ id: 'words', revision: 1, text: 'Wait, I have a question.', final: true, tokens: [] }] })
+    output.enqueue({ type: 'complete', revision: 1 })
+    output.close()
+  } }) }) })
+  const turn = { sessionId: 'alice', turnId: `barge-${stage}` }
+  const response = controller.openResponse(turn)
+  const speech = response.openSpeech({ purpose: 'answer' })
+  speech.write('The assistant is still answering.')
+  speech.end()
+  await expect.poll(() => synthesized).toHaveBeenCalledOnce()
+  if (stage === 'playing')
+    await expect.poll(() => played).toHaveBeenCalledOnce()
+
+  const detect = vi.fn(async window => window.channels[0][0])
+  controller.use(createVoiceActivityPlugin({ detect, target: () => ({ sessionId: 'alice', interruptTurns: [turn] }), acceptSpeech: async () => true, minSpeechMs: 32, silenceMs: 32 }), { grants: ['input-control', 'cancel-input'] })
+  let frame = 0
+  async function push(value: number) {
+    frames.write({ range: { sourceId: 'mic', startFrame: frame, endFrame: frame + 32 }, sampleRate: 1000, channels: [new Float32Array(32).fill(value)] })
+    frame += 32
+    await expect.poll(() => detect.mock.calls.length).toBe(frame / 32)
+  }
+
+  try {
+    // An established microphone has trimmed its initial history before the user interrupts.
+    frames.write({ range: { sourceId: 'mic', startFrame: 0, endFrame: 512 }, sampleRate: 1000, channels: [new Float32Array(512)] })
+    frame = 512
+    await expect.poll(() => detect.mock.calls.length).toBe(16)
+    await push(1)
+    expect(response.signal.aborted).toBe(false)
+    await push(0)
+    expect(response.signal.aborted).toBe(false)
+    await push(1)
+    await push(1)
+    expect(response.signal.aborted).toBe(false)
+    await push(1)
+    await expect.poll(() => response.signal.aborted).toBe(true)
+    await expect.poll(() => controller.activeInput?.state.phase).toBe('capturing')
+    const attempt = controller.activeInput!
+    await push(0)
+    expect(await attempt.done).toEqual({ status: 'committed', messageId: 'interruption' })
+    expect(received.filter(value => value === 1)).toHaveLength(128)
+    expect(submitted).toHaveBeenCalledWith(expect.objectContaining({ text: 'Wait, I have a question.', sessionId: 'alice' }), expect.any(AbortSignal))
+    expect(await response.finish()).toBe('interrupted')
+    expect(stopped).toHaveBeenCalledTimes(stage === 'playing' ? 1 : 0)
+    expect(speech.write('Late tokens after interruption.')).toEqual({ status: 'closed' })
+  }
+  finally {
+    synthesis.resolve(new Blob(['Synthetic speech']))
+    await controller.close()
+  }
+})
+
+it.each(['session', 'gap'] as const)('requires fresh speech confirmation after a %s change', async (change) => {
+  const frames = createPushStream<PcmBlock>()
+  const audio = new AudioInput({ live: true, open: () => frames.stream }, { historyMs: 360 })
+  const playback = new Playback({ nowMs: () => 0, play: () => {
+    throw new Error('This response has no synthesized audio')
+  } })
+  const controller = new VoiceController({
+    audio,
+    speech: () => ({ playback, synthesize: async () => null }),
+    transcriber: () => ({ transcribe: () => new ReadableStream<TranscriptionEvent>() }),
+    recordInterruption: async () => ({ status: 'queued' }),
+  })
+  const alice = { sessionId: 'alice', turnId: 'alice-answer' }
+  const bob = { sessionId: 'bob', turnId: 'bob-answer' }
+  const first = controller.openResponse(alice)
+  const second = controller.openResponse(bob)
+  let target = alice
+  const detect = vi.fn(async () => 1)
+  controller.use(createVoiceActivityPlugin({ detect, target: () => ({ sessionId: target.sessionId, interruptTurns: [target] }) }), { grants: ['input-control', 'cancel-input'] })
+  let frame = 0
+  let observations = 0
+  async function push() {
+    frames.write({ range: { sourceId: 'mic', startFrame: frame, endFrame: frame + 32 }, sampleRate: 1000, channels: [new Float32Array(32).fill(1)] })
+    frame += 32
+    observations += 1
+    await expect.poll(() => detect.mock.calls.length).toBe(observations)
+  }
+
+  try {
+    await push()
+    await push()
+    if (change === 'session')
+      target = bob
+    else
+      frame += 32
+    await push()
+    await push()
+    expect(first.signal.aborted).toBe(false)
+    expect(second.signal.aborted).toBe(false)
+    await push()
+    await expect.poll(() => (change === 'session' ? second : first).signal.aborted).toBe(true)
+    expect((change === 'session' ? first : second).signal.aborted).toBe(false)
+    expect(controller.activeInput?.sessionId).toBe(target.sessionId)
+  }
+  finally {
+    await controller.close()
+    await audio.close()
+  }
+})

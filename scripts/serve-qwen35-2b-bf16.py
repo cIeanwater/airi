@@ -7,6 +7,7 @@ checks publisher hashes, and records complete messages only with an explicit fla
 import argparse
 import gc
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -27,6 +28,10 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_ID = "qwen3.5-2b-bf16"
 MAX_BODY_BYTES = 1024 * 1024
+
+_context_spec = importlib.util.spec_from_file_location("local_message_context", ROOT / "scripts/local-message-context.py")
+_context_module = importlib.util.module_from_spec(_context_spec)
+_context_spec.loader.exec_module(_context_module)
 
 
 def reject_nonfinite_json(value: str) -> None:
@@ -226,6 +231,56 @@ def split_tool_calls(text: str) -> tuple[str, list]:
     return re.sub(r"<tool_call>[\s\S]*?</tool_call>", "", text).strip(), calls
 
 
+def generation_end_token_ids(tokenizer, generation_config) -> list[int]:
+    """End each chat turn at the tokenizer EOS or a checkpoint EOS."""
+    chat_eos = tokenizer.eos_token_id
+    if not isinstance(chat_eos, int) or isinstance(chat_eos, bool) or chat_eos < 0:
+        raise ValueError("The tokenizer must define a valid chat EOS token ID")
+    configured = generation_config.eos_token_id
+    additional = configured if isinstance(configured, list) else [configured]
+    return list(dict.fromkeys([chat_eos, *[
+        token for token in additional if isinstance(token, int) and not isinstance(token, bool) and token >= 0
+    ]]))
+
+
+class GenerationBoundary:
+    """Keep protocol turn boundaries out of text and speech, including split stream chunks."""
+
+    def __init__(self, markers: tuple[str, ...] = ("<|im_end|>", "<|endoftext|>", "<|im_start|>")):
+        if not markers or any(not marker for marker in markers):
+            raise ValueError("Generation boundary markers must be nonempty")
+        self.stopped = False
+        self._buffer = ""
+        self._markers = markers
+
+    def consume(self, text: str) -> str:
+        if self.stopped:
+            return ""
+        self._buffer += text
+        positions = [position for marker in self._markers if (position := self._buffer.find(marker)) >= 0]
+        if positions:
+            result = self._buffer[:min(positions)]
+            self._buffer = ""
+            self.stopped = True
+            return result
+
+        # A streamer chunk can divide a protocol marker. Hold only its possible prefix.
+        held = max((
+            length
+            for marker in self._markers
+            for length in range(1, min(len(self._buffer), len(marker) - 1) + 1)
+            if self._buffer.endswith(marker[:length])
+        ), default=0)
+        result = self._buffer[:-held] if held else self._buffer
+        self._buffer = self._buffer[-held:] if held else ""
+        return result
+
+    def finish(self) -> str:
+        result = self._buffer
+        self._buffer = ""
+        return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", type=Path, default=ROOT / "local-models" / "qwen3.5-2b-bf16")
@@ -273,6 +328,7 @@ def main() -> int:
         raise RuntimeError("Unexpected loaded weight device or dtype")
     if not dtype_counts["torch.bfloat16"] or getattr(model, "is_quantized", False):
         raise RuntimeError("The loaded model is not an unquantized BF16 model")
+    end_token_ids = generation_end_token_ids(tokenizer, model.generation_config)
     evidence.update({
         "model_id": MODEL_ID, "pid": os.getpid(), "port": args.port,
         "torch": torch.__version__, "transformers": transformers.__version__,
@@ -282,6 +338,7 @@ def main() -> int:
         "model_class": type(model).__name__, "load_seconds": round(time.perf_counter() - started, 3),
         "max_context": args.max_context, "max_output": args.max_output,
         "cuda_allocated_bytes": torch.cuda.memory_allocated(),
+        "generation_end_token_ids": end_token_ids,
     })
     args.evidence_file.parent.mkdir(parents=True, exist_ok=True)
     args.evidence_file.write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -307,7 +364,7 @@ def main() -> int:
             if origin is not None and allows_browser_origin(origin):
                 self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Humanning-Session-ID, X-Humanning-Turn-ID, X-Humanning-Message-ID")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             if getattr(self, "completion_id", None) is not None:
                 self.send_header("X-Request-ID", self.completion_id)
@@ -343,6 +400,18 @@ def main() -> int:
         def do_POST(self) -> None:
             if self.reject_foreign_origin():
                 return
+            if self.path == "/v1/debug/message-context":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= MAX_BODY_BYTES:
+                        raise ValueError("The JSON request must be between 1 byte and 1 MiB")
+                    query = json.loads(self.rfile.read(length), parse_constant=reject_nonfinite_json)
+                    result = _context_module.read_local_message_context(recorder.directory, query,
+                        max_age_days=recorder.max_age_days, max_records=recorder.max_records)
+                    self.response(200, result)
+                except (ValueError, TypeError) as error:
+                    self.response(400, {"error": {"message": str(error)}})
+                return
             if self.path != "/v1/chat/completions":
                 self.response(404, {"error": {"message": "Unknown endpoint"}})
                 return
@@ -356,6 +425,11 @@ def main() -> int:
                 "endpoint": "/v1/chat/completions", "request": None,
                 "response": None, "stream_events": [], "stream_done": False,
             }
+            correlation = {key: self.headers.get(header, "") for key, header in (
+                ("session_id", "X-Humanning-Session-ID"), ("turn_id", "X-Humanning-Turn-ID"),
+                ("message_id", "X-Humanning-Message-ID"))}
+            if all(re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value) for value in correlation.values()):
+                record["correlation"] = correlation
 
             def save_record(status: str, http_status: int, error=None) -> None:
                 record.update(status=status, http_status=http_status,
@@ -394,6 +468,8 @@ def main() -> int:
             request_started = time.perf_counter()
             created = int(started_at)
             output_text = ""
+            raw_output_text = ""
+            boundary = GenerationBoundary()
             final_status = "error"
             final_http_status = 500
             inputs = None
@@ -428,7 +504,8 @@ def main() -> int:
                         f"exceed the {args.max_context}-token runtime limit"
                     )
                 options = {"max_new_tokens": request["max_tokens"], "do_sample": request["temperature"] > 0,
-                           "use_cache": True, "stopping_criteria": [CancelGeneration(canceled)]}
+                           "use_cache": True, "eos_token_id": end_token_ids,
+                           "stopping_criteria": [CancelGeneration(canceled)]}
                 if options["do_sample"]:
                     options.update(temperature=request["temperature"], top_p=request["top_p"])
                 if recorder.directory is not None:
@@ -463,24 +540,30 @@ def main() -> int:
                             continue
                         except StopIteration:
                             break
-                        output_text += part
+                        raw_output_text += part
+                        clean = boundary.consume(part)
+                        output_text += clean
+                        if boundary.stopped:
+                            canceled.set()
                         if not request["tools"]:
-                            clean = part.replace("<|im_end|>", "").replace("<|endoftext|>", "")
                             if clean:
                                 send_event({"content": clean})
                     worker.join()
                     if generation_error:
                         raise RuntimeError(generation_error[0])
-                    output_text = output_text.replace("<|im_end|>", "").replace("<|endoftext|>", "")
+                    tail = boundary.finish()
+                    output_text += tail
+                    if tail and not request["tools"]:
+                        send_event({"content": tail})
                 else:
                     with torch.inference_mode():
                         output = model.generate(**inputs, **options)
                     generated_tokens.append(int(output.shape[-1] - prompt_tokens))
-                    output_text = tokenizer.decode(output[0, prompt_tokens:], skip_special_tokens=False)
-                    output_text = output_text.replace("<|im_end|>", "").replace("<|endoftext|>", "")
+                    raw_output_text = tokenizer.decode(output[0, prompt_tokens:], skip_special_tokens=False)
+                    output_text = boundary.consume(raw_output_text) + boundary.finish()
                 content, calls = split_tool_calls(output_text)
                 count = generated_tokens[0]
-                finish = "tool_calls" if calls else ("length" if count >= request["max_tokens"] else "stop")
+                finish = "tool_calls" if calls else ("length" if count >= request["max_tokens"] and not boundary.stopped else "stop")
                 usage = {"prompt_tokens": int(prompt_tokens), "completion_tokens": count, "total_tokens": int(prompt_tokens) + count}
                 message = {"role": "assistant", "content": content or None}
                 if calls:
@@ -545,6 +628,7 @@ def main() -> int:
                     lock.release()
                 if recorder.directory is not None:
                     record["model_output_text"] = output_text
+                    record["model_output_raw_text"] = raw_output_text
                 save_record(final_status, final_http_status)
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

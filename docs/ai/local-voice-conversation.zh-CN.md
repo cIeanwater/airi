@@ -4,22 +4,28 @@
 
 更新日期：2026-10-18。
 
-桌面当前使用 Zipformer small 中英双语流式转写、Smart Turn v3.2 判断说话是否结束、Qwen3.5-2B BF16 回复、MOSS-TTS-Nano ONNX 合成。
-默认女声音色为 Xiaoyu，另可选 Yuewen、Lingyu。语音组件使用 CPU，对话模型保持原有 BF16 GPU 推理。
-Nano 根据文字与标点产生语调，不支持自然语言情绪指令；ACT 继续驱动人物表情。
-模型选择、固定版本、实测延迟与能力边界见[轻量语音研究](research/2026-10-17-fast-local-voice.zh-CN.md)。
-完整自动对话、原桌面、直接启动与麦克风状态见[当前验收](validation/2026-10-17-fast-local-companion.zh-CN.md)。
+默认方案使用 Zipformer small 中英双语流式转写、Smart Turn v3.2 判断说话是否结束、Gemma 4 E2B INT4 回复、GPT-SoVITS v2ProPlus 合成。
+默认声音为 `student-bright`，使用本机已有的原创合成参考声音，目标是年轻、明亮的中文学生声线。
+声线与韵律由参考声音控制，不支持自然语言情绪指令。ACT 继续驱动人物表情。
+
+ASR 与说话结束判断使用 CPU。Gemma 使用 Vulkan GPU 推理，默认上下文为 16,384 token，KV 缓存为 Q8。
+TTS 合成核心使用 CUDA FP16，辅助特征模型使用 CPU。合成核心约 176M 参数，CPU 辅助模型另计。
+声线选择、固定版本、显存与实测延迟见[小型学生声线研究](research/2026-10-18-compact-student-voice.zh-CN.md)。
+Gemma 的准备与运行方式见[Gemma INT4](local-gemma4-int4.zh-CN.md)。
+人格、记忆和上下文修改入口见[上下文编辑](companion-context-editing.zh-CN.md)。
 
 | 作用 | 当前本地服务 |
 | --- | --- |
 | 说话结束判断 | `http://127.0.0.1:18085/v1/turn`，Smart Turn v3.2 CPU |
 | 语音转写 | `http://127.0.0.1:18086/v1/`，`zipformer-small-zh-en-int8` CPU |
 | 实时转写 | `ws://127.0.0.1:18087/v1/stream`，在对应 Provider 配置 `localStreamingUrl` |
-| 对话 | `http://127.0.0.1:18083/v1/`，`qwen3.5-2b-bf16` |
-| 语音输出 | `http://127.0.0.1:18084/v1/`，`moss-tts-nano-100m`，`xiaoyu` |
+| 对话 | `http://127.0.0.1:18083/v1/`，`gemma4-e2b-int4`，本地记录网关 |
+| 对话推理内核 | `http://127.0.0.1:18088/`，llama.cpp Vulkan，仅供本地网关使用 |
+| 语音输出 | `http://127.0.0.1:18084/v1/`，`gpt-sovits-v2proplus`，`student-bright` |
 
-此前 Whisper 与 Qwen3-TTS 1.7B 的选型和验收记录保留为历史：[输入研究](research/2026-10-17-modern-voice-input.zh-CN.md)、[输出研究](research/2026-10-17-expressive-tts.zh-CN.md)、[此前验收](validation/2026-10-17-modern-voice.zh-CN.md)。
-它们不代表当前默认速度配置。
+此前 MOSS Nano、Qwen BF16、Whisper 与 Qwen3-TTS 1.7B 的记录保留为历史。
+见[轻量语音研究](research/2026-10-17-fast-local-voice.zh-CN.md)、[原轻量方案验收](validation/2026-10-17-fast-local-companion.zh-CN.md)、[输入研究](research/2026-10-17-modern-voice-input.zh-CN.md)和[输出研究](research/2026-10-17-expressive-tts.zh-CN.md)。
+这些记录不代表当前默认模型。
 
 本机双击仓库根目录 `Start-Humanning.cmd` 即可启动。入口会复用健康服务，保留原桌面 profile 和聊天数据。
 当前仍是源码运行，需要已有 Node/pnpm 依赖、Python 环境与权重；不是独立安装包。
@@ -39,17 +45,35 @@ python scripts/start-local-voice.py
 ```
 
 该入口使用本机已有的独立环境，不执行安装或下载。
+默认 TTS 环境是父目录 `.tools/gpt-sovits-venv`，运行目录是 `.tools/gpt-sovits-v2proplus`。
+参考声音是父目录 `.tools/modern-voice-2026-10-17/vivian-curious.wav`。
 它后台启动服务和原桌面 profile，并复用通过健康检查的已有服务。
 `--check` 检查文件路径与桌面 Node 版本。服务启动时另行校验模型权重。
 其他目录通过 `--tools-dir` 与 `--models-dir` 指定。
 只启动服务时使用 `--services-only`，此模式不需要 Node 或桌面依赖。
 
-2026-10-18 的启动环境回归与复测结果见[启动验收](validation/2026-10-18-windows-launcher.zh-CN.md)。
+| 参数 | 用途 |
+| --- | --- |
+| `--llm gemma` | 默认 Gemma INT4，启动推理内核与消息记录网关 |
+| `--llm qwen` | 显式运行已准备的 Qwen3.5-2B BF16 |
+| `--context-size 16384` | Gemma 上下文大小，范围为 4,096 至 131,072 |
+| `--tts gpt-sovits` | 默认学生声线，需要已准备的 CUDA 运行环境 |
+| `--tts moss` | 显式运行原 MOSS Nano CPU 服务，需要其独立环境 |
+| `--no-message-recording` | 关闭完整模型请求 JSON，保留聊天历史 |
+
+增加上下文会增加 KV 缓存占用。当前默认不预分配 128K 上下文。
+Gemma 网关在开始提供服务前，用公开合成文本预热常用提示词。
+首次启动会等待模型加载与预热，这些文本不写入用户的消息记录。
+`--llm` 与 `--tts` 选择后台服务，桌面当前角色卡仍须选择对应模型和声音。
+切换时，先停止原先占用同一端口的服务，再运行新选项。
+启动器不会把占用 `18084` 的旧 MOSS 服务误认为新学生声线。
+
+此前桌面启动环境与 Node 的回归结果见[启动验收](validation/2026-10-18-windows-launcher.zh-CN.md)。
 
 默认开启本地模式，不需要账号登录。账号、云同步、官方托管 Provider 和产品遥测入口已关闭。
 切换模型时要同时保存当前角色卡的语音设置和全局设置。本机已完成此项。
 本地 ASR/TTS 的 API Key 填 `local` 作为兼容占位值，两者只监听回环地址，不向外提供服务。
-若要恢复旧 Qwen3-TTS 1.7B，先停止占用 `18084` 的 Nano 服务，再按历史文档启动；不要让两者抢同一端口。
+默认入口不加载 Qwen3-TTS 1.7B。
 
 开发工具的两个 V 浮标默认关闭。只有显式设置 `AIRI_VUE_DEVTOOLS=true` 后重新启动开发服务器才会出现。
 
@@ -57,6 +81,8 @@ python scripts/start-local-voice.py
 默认保留七天内最新 1,000 份。使用 `--no-message-recording` 可关闭此项。
 复用中的模型服务配置不同于请求参数时，入口报错并要求重新启动该服务。
 记录字段及查看方法见[消息 JSON](local-message-json.zh-CN.md)。
+消息右键菜单的“查看完整上下文”可以读取该轮保存的输入和输出 JSON。
+历史记录已过期、未开启记录或不能唯一匹配时，界面会说明原因，不重建猜测的请求。
 
 日志目录为父目录 `.tools/local-voice-logs`。
 该启动入口不注册开机任务。电脑重启后需再次运行。
@@ -147,6 +173,18 @@ python .\scripts\serve-local-kokoro.py --runtime-dir D:\path\to\Kokoro-FastAPI-0
 停顿时间不包含 ASR、改写、模型回复或 TTS 的计算耗时。
 
 停顿策略和续句回归见[语音回合结束机制](adr/2026-10-17-voice-turn-completion.zh-CN.md)。
+
+## 流式输出与说话打断
+
+模型以 SSE 增量输出文字，语音按自然句子进入合成队列。
+GPT-SoVITS 在整句合成结束前返回 PCM，播放器按响应头中的 32 kHz 单声道格式播放。
+此流程不需要等整段回复结束后再播放。
+
+播放期间检测到连续约 96 ms 的有效说话活动后，当前回复被打断。
+打断会取消模型请求、TTS 请求、已排队的声音和后续旧片段。
+麦克风继续工作，保留开头的音频，新的话语仍按停顿规则自动发送。
+浏览器报告缺少回声消除能力时，打断功能也继续启用。
+真实扬声器回声与麦克风距离会影响 VAD，实机效果仍需现场试听。
 
 ## 状态标记、表情与口型
 

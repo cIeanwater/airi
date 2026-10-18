@@ -11,18 +11,18 @@ AIRI 提供应用框架、角色渲染与模型 Provider 接口。本仓库重�
 
 | 方向 | 当前能力 | 说明 |
 | --- | --- | --- |
-| 本地推理 | Qwen3.5-2B BF16，OpenAI 兼容接口，普通 JSON 与 SSE 输出 | [本地模型服务](ai/local-qwen35-2b-bf16.zh-CN.md) |
+| 本地推理 | Gemma 4 E2B QAT INT4，GPU 推理，16K 上下文，JSON 与 SSE 输出 | [本地模型服务](ai/local-gemma4-int4.zh-CN.md) |
 | 长期记忆 | 按用户、角色授权，检索历史证据，编辑、删除和 JSON 导入导出 | [记忆模块](../packages/memory-local/README.md) |
 | 记忆评测 | 固定数据版本、可复跑的 LongMemEval-S 检索评测和机器可读报告 | [评测协议与结果](../packages/memory-local/benchmarks/README.md) |
 | 消息持久化 | 等待助手消息保存再报告完成，导出最新消息，拒绝账号切换后的过期写入 | [本地持久化机制](ai/adr/2026-10-16-local-chat-persistence.zh-CN.md) |
-| 完整消息 JSON | 按需保存实际请求上下文、模板展开内容、模型输出、工具调用和错误 | [查看真实输入输出](ai/local-message-json.zh-CN.md) |
-| 语音对话 | 随应用分发的离线 VAD、停顿后自动提交、语音播放和完整链路回归 | [语音对话配置](ai/local-voice-conversation.zh-CN.md) |
+| 完整消息 JSON | 消息菜单查看生成时的请求、模板、模型输出和工具轮次，支持复制、下载 | [上下文与人格修改](ai/companion-context-editing.zh-CN.md) |
+| 语音对话 | 离线 VAD、流式转写、停顿后自动提交、流式播放与说话打断 | [语音对话配置](ai/local-voice-conversation.zh-CN.md) |
 | 角色互动 | 情绪与动作标记、有效动作选择、Live2D 表情和随音频变化的口型 | [表情联动验收](ai/validation/2026-10-17-voice-expression-link.zh-CN.md) |
 
-当前本机使用约 60 MB 的中英双语流式 Zipformer 转写、Smart Turn v3.2 判断停顿、MOSS-TTS-Nano ONNX 合成女声。
-语音组件在 CPU 上运行，Qwen3.5-2B 保持 BF16 参数并使用 GPU。
-已知中文文本的桌面试听约 314 ms 开始播放；这不含识别与对话模型耗时。[研究与实测](ai/research/2026-10-17-fast-local-voice.zh-CN.md)记录模型取舍。
-ACT 控制人物表情。Nano 根据文字与标点生成语调，不接受情绪指令。
+当前本机使用约 60 MB 的中英双语流式 Zipformer 转写与 Smart Turn v3.2 判断停顿，两者使用 CPU。
+GPT-SoVITS v2ProPlus 用原创合成参考声音生成明亮中文学生声线，FP16 合成核心在 GPU 上运行。
+辅助特征模型使用 CPU，为 Gemma 和上下文缓存保留显存。[语音研究与实测](ai/research/2026-10-18-compact-student-voice.zh-CN.md)记录资源占用与限制。
+ACT 控制人物表情。当前声线不接受自然语言情绪指令，音色偏好需试听确认。
 
 ## 消息、记忆与数据沉淀
 
@@ -81,6 +81,7 @@ LongMemEval-S 应用预算使用六个证据块，在 470 道可回答问题上�
 
 近期验收记录：
 
+- [Gemma、流式语音、打断与消息上下文](ai/validation/2026-10-18-streaming-context-companion.zh-CN.md)
 - [轻量流式语音、直接启动与免登录](ai/validation/2026-10-17-fast-local-companion.zh-CN.md)
 - [音频、模型回复与持久化](ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)
 - [离线语音检测](ai/validation/2026-10-17-offline-voice-detection.zh-CN.md)

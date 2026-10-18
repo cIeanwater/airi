@@ -143,7 +143,7 @@ process.stdout.write(JSON.stringify({
 
         logs = self.root / "controlled service logs"
         logs.mkdir()
-        arguments = SimpleNamespace(services_only=False, no_message_recording=False)
+        arguments = SimpleNamespace(services_only=False, no_message_recording=False, llm="qwen", tts="moss", context_size=16384)
         journal = io.StringIO()
         processes = []
         start_process = subprocess.Popen
@@ -181,6 +181,72 @@ process.stdout.write(JSON.stringify({
                          ["asr", "turn", "llm", "tts", "desktop"])
         self.assertTrue(events[-1]["ready"])
 
+    def test_gemma_and_student_voice_use_separate_prepared_runtimes(self):
+        processes = []
+        models = {18086: "zipformer-small-zh-en-int8", 18085: "smart-turn-v3.2-cpu",
+                  18088: "gemma4-e2b-int4", 18083: "gemma4-e2b-int4", 18084: "gpt-sovits-v2proplus"}
+
+        def health(port, path="/health", _token=None):
+            if len(processes) <= list(models).index(port):
+                return None
+            if port == 18088:
+                return {"data": [{"id": models[port]}]} if path == "/v1/models" else {"status": "ok"}
+            return {"status": "ready", "model": models[port], "message_recording": {"enabled": True}}
+
+        def run_process(command, **kwargs):
+            process = SimpleNamespace(args=command, pid=100 + len(processes), poll=lambda: None, kwargs=kwargs)
+            processes.append(process)
+            return process
+
+        models_root = self.root / "prepared models"
+        tts_root = self.tools / "gpt-sovits-v2proplus"
+        tts_python = self.tools / "gpt-sovits-venv/Scripts/python.exe"
+        logs = self.root / "student service logs"
+        logs.mkdir()
+        arguments = SimpleNamespace(services_only=True, no_message_recording=False,
+                                    llm="gemma", tts="gpt-sovits", context_size=16384)
+        with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
+            with patch.object(LAUNCHER, "port_is_free", return_value=True):
+                with patch.object(LAUNCHER.subprocess, "Popen", side_effect=run_process):
+                    result = LAUNCHER.start_services(arguments, self.tools, models_root, logs,
+                                                     models_root / "gateway python.exe", self.root / "asr.exe",
+                                                     self.root / "turn.exe", tts_python, self.root / "asr",
+                                                     self.root / "turn", tts_root, self.desktop, None, None)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(processes), 5)
+        engine = processes[2].args
+        self.assertEqual(engine[0], str(models_root / "runtime/llama.cpp-b11146-vulkan/llama-server.exe"))
+        self.assertEqual(engine[engine.index("--ctx-size") + 1], "16384")
+        self.assertEqual(engine[engine.index("--gpu-layers") + 1], "all")
+        gateway = processes[3].args
+        self.assertIn("--warmup", gateway)
+        self.assertEqual(gateway[gateway.index("--upstream") + 1], "http://127.0.0.1:18088")
+        self.assertEqual(gateway[gateway.index("--record-messages-dir") + 1], str(self.tools / "airi-message-records"))
+        self.assertEqual(processes[4].args, [str(tts_python), "-u", str(ROOT / "scripts/serve-local-gpt-sovits.py"),
+                                           "--runtime-dir", str(tts_root), "--reference",
+                                           str(self.tools / "modern-voice-2026-10-17/vivian-curious.wav"),
+                                           "--port", "18084", "--threads", "4"])
+        self.assertTrue(all(process.kwargs["env"]["HF_HUB_OFFLINE"] == "1" for process in processes))
+
+    def test_old_voice_on_the_student_voice_port_is_not_reused(self):
+        models = {18086: "zipformer-small-zh-en-int8", 18085: "smart-turn-v3.2-cpu",
+                  18083: "qwen3.5-2b-bf16", 18084: "moss-tts-nano-100m"}
+
+        def health(port, _path="/health", _token=None):
+            return {"status": "ready", "model": models[port], "message_recording": {"enabled": True}}
+
+        arguments = SimpleNamespace(services_only=True, no_message_recording=False,
+                                    llm="qwen", tts="gpt-sovits", context_size=16384)
+        with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
+            with patch.object(LAUNCHER, "port_is_free", return_value=False):
+                with patch.object(LAUNCHER.subprocess, "Popen") as process:
+                    with self.assertRaisesRegex(RuntimeError, "18084.*tts health check"):
+                        LAUNCHER.start_services(arguments, self.tools, self.root, self.root,
+                                                self.root / "llm.exe", self.root / "asr.exe", self.root / "turn.exe",
+                                                self.root / "tts.exe", self.root, self.root, self.root,
+                                                self.desktop, None, None)
+        process.assert_not_called()
+
 
 @unittest.skipUnless(os.name == "nt", "The prepared launcher supports Windows runtimes.")
 class LauncherPreflightTests(unittest.TestCase):
@@ -197,6 +263,8 @@ class LauncherPreflightTests(unittest.TestCase):
         files = [
             self.models / "airllm-cuda-venv/Scripts/python.exe",
             self.models / "qwen3.5-2b-bf16/config.json",
+            self.models / "runtime/llama.cpp-b11146-vulkan/llama-server.exe",
+            self.models / "gemma4-e2b-int4/gemma-4-E2B_q4_0-it.gguf",
             self.models / "qwen3.5-2b-bf16/model.safetensors-00001-of-00001.safetensors",
             self.tools / "fast-asr/venv/Scripts/python.exe",
             self.tools / "smart-turn-v3.2/venv/Scripts/python.exe",
@@ -206,13 +274,26 @@ class LauncherPreflightTests(unittest.TestCase):
             self.tools / "moss-tts-nano/models/MOSS-TTS-Nano-100M-ONNX/browser_poc_manifest.json",
             self.tools / "moss-tts-nano/models/MOSS-TTS-Nano-100M-ONNX/moss_tts_global_shared.data",
             self.tools / "moss-tts-nano/models/MOSS-TTS-Nano-100M-ONNX/moss_tts_local_shared.data",
+            self.tools / "gpt-sovits-venv/Scripts/python.exe",
+            self.tools / "modern-voice-2026-10-17/vivian-curious.wav",
+            self.tools / "gpt-sovits-v2proplus/publisher-manifest.json",
+            self.tools / "gpt-sovits-v2proplus/GPT_SoVITS/TTS_infer_pack/TTS.py",
             self.root / "apps/stage-tamagotchi/node_modules/electron-vite/bin/electron-vite.js",
         ]
         files.extend(self.tools / "fast-asr/zipformer-bilingual-small" / name for name in (
             "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx",
             "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt"))
         files.extend(self.root / "scripts" / name for name in (
-            "serve-qwen35-2b-bf16.py", "serve-fast-asr.py", "serve-smart-turn.py", "serve-local-moss-tts.py"))
+            "serve-qwen35-2b-bf16.py", "serve-fast-asr.py", "serve-smart-turn.py", "serve-local-moss-tts.py",
+            "serve-local-gemma.py", "local-message-context.py", "serve-local-gpt-sovits.py"))
+        files.extend(self.tools / "gpt-sovits-v2proplus/GPT_SoVITS/pretrained_models" / name for name in (
+            "s1v3.ckpt", "v2Pro/s2Gv2ProPlus.pth", "sv/pretrained_eres2netv2w24s4ep4.ckpt",
+            "chinese-roberta-wwm-ext-large/pytorch_model.bin", "chinese-roberta-wwm-ext-large/config.json",
+            "chinese-roberta-wwm-ext-large/tokenizer.json", "chinese-hubert-base/pytorch_model.bin",
+            "chinese-hubert-base/config.json", "chinese-hubert-base/preprocessor_config.json", "fast_langdetect/lid.176.bin"))
+        files.extend(self.tools / "gpt-sovits-v2proplus/GPT_SoVITS/text/G2PWModel" / name for name in (
+            "g2pW.onnx", "config.py", "POLYPHONIC_CHARS.txt", "MONOPHONIC_CHARS.txt",
+            "char_bopomofo_dict.json", "bopomofo_to_pinyin_wo_tune_dict.json"))
         for path in files:
             write_file(path)
 
@@ -257,6 +338,34 @@ class LauncherPreflightTests(unittest.TestCase):
         output = json.loads(result.stdout)
         self.assertTrue(output["prepared_paths"])
         self.assertIsNone(output["desktop_node"])
+        self.assertFalse((self.tools / "local-voice-logs").exists())
+
+    def test_defaults_do_not_require_moss_or_qwen_model_weights(self):
+        for directory in (self.tools / "moss-tts-nano", self.models / "qwen3.5-2b-bf16"):
+            shutil.rmtree(directory)
+        (self.root / "scripts/serve-local-moss-tts.py").unlink()
+        result = self.run_entry("--services-only", "--check")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["llm"], "gemma")
+        self.assertEqual(output["tts"], "gpt-sovits")
+        self.assertEqual(output["context_size"], 16384)
+
+    def test_explicit_moss_does_not_require_student_voice_files(self):
+        shutil.rmtree(self.tools / "gpt-sovits-v2proplus")
+        shutil.rmtree(self.tools / "gpt-sovits-venv")
+        (self.tools / "modern-voice-2026-10-17/vivian-curious.wav").unlink()
+        (self.root / "scripts/serve-local-gpt-sovits.py").unlink()
+        result = self.run_entry("--services-only", "--check", "--tts", "moss")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout)["tts"], "moss")
+
+    def test_missing_voice_reference_fails_without_starting_services(self):
+        reference = self.tools / "modern-voice-2026-10-17/vivian-curious.wav"
+        reference.unlink()
+        result = self.run_entry("--services-only", "--check")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["missing_files"], [str(reference)])
         self.assertFalse((self.tools / "local-voice-logs").exists())
 
     def run_batch(self, *arguments):

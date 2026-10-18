@@ -577,7 +577,7 @@ export const useSpeechStore = defineStore('speech', () => {
     }
     if (!model || !voiceId)
       throw new Error('Speech requires a model and voice')
-    if (providerId === 'openai-compatible-audio-speech' && model === 'moss-tts-nano-100m') {
+    if (providerId === 'openai-compatible-audio-speech' && ['moss-tts-nano-100m', 'gpt-sovits-v2proplus'].includes(model)) {
       return { ...output, stream: async (text, signal) => streamLocalSpeech({
         baseUrl: typeof config.baseUrl === 'string' ? config.baseUrl : '',
         model,

@@ -102,10 +102,31 @@ chat:
     reading: '正在读取图片…'
     description: '图片附件'
   actions:
+    menu: 消息操作
+    copy: 复制
+    delete: 删除
+    context: 查看完整上下文
     reply: 回复
     retry: 重试
     send: 发送消息
     stop: 停止回复
+  context:
+    title: 消息完整上下文
+    description: 查看当时保存的 JSON，包括实际请求、系统提示词、历史消息、记忆、模型原始输出和最终回复（以已记录的字段为准）。
+    json: 消息完整记录 JSON
+    close: 关闭
+    loading: 正在读取已保存的上下文…
+    failed: 无法读取已保存的上下文。
+    retry: 重试
+    copy: 复制完整 JSON
+    copied: 已复制 JSON
+    copy-failed: 无法复制 JSON。
+    download: 下载 JSON
+    content-match: 这条旧消息通过内容匹配到已保存的记录，没有记录消息 ID。
+    not-recorded: 没有找到这条消息的原始记录。无法从当前对话还原当时的请求。
+    unsupported-provider: 当前模型提供商不支持查看已保存的消息上下文。
+    recording-disabled: 消息记录已关闭，没有可查看的请求和回复记录。
+    ambiguous: 有多条记录与这条消息匹配，无法准确确定原始上下文。
   message:
     character-name:
       core-system: 核心系统

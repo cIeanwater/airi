@@ -43,6 +43,28 @@ function pcmHeaders(response: ServerResponse) {
 }
 
 describe('local streaming speech transport', () => {
+  it('keeps a GPT-SoVITS sentence intact and decodes its 32 kHz mono PCM', async () => {
+    const requests: { input: string, model: string, voice: string }[] = []
+    const text = '今天放学以后，我们一起去看看新开的书店，好不好呀？'
+    const baseUrl = await fixture((response, body) => {
+      requests.push(JSON.parse(body))
+      response.writeHead(200, { 'Content-Type': 'audio/pcm', 'X-Audio-Sample-Rate': '32000', 'X-Audio-Channels': '1' })
+      response.end(Buffer.from([0, 64, 0, 192]))
+    })
+    const output = streamLocalSpeech({ baseUrl, model: 'gpt-sovits-v2proplus', voice: 'student-bright' }, input(text), new AbortController().signal).getReader()
+    const part = await output.read()
+    if (part.done || part.value.audio instanceof Blob)
+      throw new Error('Missing playable PCM stream')
+    const pcm = part.value.audio.getReader()
+    const first = await pcm.read()
+    expect(first.value?.sampleRate).toBe(32000)
+    expect(first.value?.channels).toHaveLength(1)
+    expect(Array.from(first.value?.channels[0] ?? [])).toEqual([0.5, -0.5])
+    expect((await pcm.read()).done).toBe(true)
+    expect((await output.read()).done).toBe(true)
+    expect(requests).toEqual([{ input: text, model: 'gpt-sovits-v2proplus', voice: 'student-bright', response_format: 'pcm', stream: true }])
+  })
+
   it('plays stereo PCM before HTTP EOF and preserves frames across split bytes', async () => {
     const finish = Promise.withResolvers<void>()
     const baseUrl = await fixture((response, body) => {
@@ -68,6 +90,37 @@ describe('local streaming speech transport', () => {
     expect(last.value?.range).toMatchObject({ startFrame: 2, endFrame: 3, sourceId: first.value?.range.sourceId })
     expect((await pcm.read()).done).toBe(true)
     expect((await output.read()).done).toBe(true)
+  })
+
+  it('keeps unpunctuated GPT-SoVITS output within its Unicode character limit', async () => {
+    const requests: string[] = []
+    const text = `${'说'.repeat(239)}🙂${'话'.repeat(30)}`
+    const baseUrl = await fixture((response, body) => {
+      const request: { input: string } = JSON.parse(body)
+      requests.push(request.input)
+      if (Array.from(request.input).length > 240) {
+        response.writeHead(400).end()
+        return
+      }
+      response.writeHead(200, { 'Content-Type': 'audio/pcm', 'X-Audio-Sample-Rate': '32000', 'X-Audio-Channels': '1' })
+      response.end(Buffer.from([0, 64]))
+    })
+    const output = streamLocalSpeech({ baseUrl, model: 'gpt-sovits-v2proplus', voice: 'student-bright' }, input(text), new AbortController().signal).getReader()
+    let audioParts = 0
+    while (true) {
+      const part = await output.read()
+      if (part.done)
+        break
+      if (part.value.audio instanceof Blob)
+        throw new Error('Missing playable PCM stream')
+      const pcm = part.value.audio.getReader()
+      expect((await pcm.read()).value?.sampleRate).toBe(32000)
+      expect((await pcm.read()).done).toBe(true)
+      audioParts++
+    }
+    expect(audioParts).toBe(2)
+    expect(requests.map(request => Array.from(request).length)).toEqual([240, 30])
+    expect(requests.join('')).toBe(text)
   })
 
   it('aborts an unfinished HTTP body and never starts the next phrase', async () => {

@@ -1,7 +1,7 @@
 /**
  * Represents supported chat message action identifiers.
  */
-export type ChatActionMenuAction = 'reply' | 'copy' | 'retry' | 'delete'
+export type ChatActionMenuAction = 'reply' | 'copy' | 'context' | 'retry' | 'delete'
 
 /**
  * Represents one visible action in a chat message action menu.
@@ -50,15 +50,19 @@ export interface ChatActionMenuTriggerState {
  * - Boolean flags already reflect message capability and visibility rules
  *
  * Returns:
- * - Menu items ordered as reply, copy, retry, delete
+ * - Menu items ordered as reply, copy, context, retry, delete
  */
 export function createChatActionMenuItems(options: {
   canReply: boolean
   canCopy: boolean
+  canContext: boolean
   canRetry: boolean
   canDelete: boolean
-  retryLabel?: string
+  retryLabel: string
   replyLabel: string
+  copyLabel: string
+  contextLabel: string
+  deleteLabel: string
 }): ChatActionMenuItem[] {
   return [
     options.canReply
@@ -71,21 +75,28 @@ export function createChatActionMenuItems(options: {
     options.canCopy
       ? {
           action: 'copy',
-          label: 'Copy',
+          label: options.copyLabel,
           icon: 'i-solar:copy-bold',
+        }
+      : null,
+    options.canContext
+      ? {
+          action: 'context',
+          label: options.contextLabel,
+          icon: 'i-solar:code-square-linear',
         }
       : null,
     options.canRetry
       ? {
           action: 'retry',
-          label: options.retryLabel ?? 'Retry',
+          label: options.retryLabel,
           icon: 'i-solar:refresh-bold',
         }
       : null,
     options.canDelete
       ? {
           action: 'delete',
-          label: 'Delete',
+          label: options.deleteLabel,
           icon: 'i-solar:trash-bin-minimalistic-bold',
           danger: true,
         }

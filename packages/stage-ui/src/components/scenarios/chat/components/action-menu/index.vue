@@ -30,6 +30,7 @@ import { useElementScroll } from '../../composables/use-element-scroll'
 const props = withDefaults(defineProps<{
   canCopy?: boolean
   canReply?: boolean
+  canContext?: boolean
   canRetry?: boolean
   canDelete?: boolean
   copyText?: string
@@ -40,10 +41,10 @@ const props = withDefaults(defineProps<{
 }>(), {
   canCopy: true,
   canReply: false,
+  canContext: true,
   canRetry: false,
   canDelete: true,
   copyText: '',
-  menuLabel: 'Message actions',
   placement: 'right',
   pressFeedbackEnabled: false,
   scrollContainer: null,
@@ -52,6 +53,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'reply'): void
+  (e: 'context'): void
   (e: 'retry'): void
   (e: 'delete'): void
 }>()
@@ -96,10 +98,14 @@ const copyFeedbackActive = shallowRef(false)
 const menuItems = computed(() => createChatActionMenuItems({
   canReply: props.canReply,
   canCopy: props.canCopy && props.copyText.trim().length > 0,
+  canContext: props.canContext,
   canRetry: props.canRetry,
   canDelete: props.canDelete,
   retryLabel: t('stage.chat.actions.retry'),
   replyLabel: t('stage.chat.actions.reply'),
+  copyLabel: t('stage.chat.actions.copy'),
+  contextLabel: t('stage.chat.actions.context'),
+  deleteLabel: t('stage.chat.actions.delete'),
 }))
 const triggerState = computed(() => createChatActionMenuTriggerState({
   copyFeedbackActive: copyFeedbackActive.value,
@@ -246,6 +252,11 @@ const { trigger: triggerCopyFeedbackReset, clear: clearCopyFeedbackReset } = use
 }, { delay: 1000 })
 
 async function handleAction(action: ChatActionMenuAction) {
+  if (action === 'context') {
+    emit('context')
+    return
+  }
+
   if (action === 'reply') {
     emit('reply')
     return
@@ -342,12 +353,12 @@ onUnmounted(() => scaleAnimation?.cancel())
         <div
           ref="topSentinel"
           aria-hidden="true"
-          class="pointer-events-none absolute inset-x-0 top-0 h-px opacity-0"
+          :class="['pointer-events-none absolute inset-x-0 top-0 h-px opacity-0']"
         />
         <div
           ref="bottomSentinel"
           aria-hidden="true"
-          class="pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-0"
+          :class="['pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-0']"
         />
 
         <DropdownMenuRoot @update:open="handleDropdownMenuOpenChange">
@@ -370,7 +381,7 @@ onUnmounted(() => scaleAnimation?.cancel())
                 'dark:bg-neutral-900/85 dark:text-neutral-300',
                 'transition-colors hover:text-primary-500 dark:hover:text-primary-300',
               ]"
-              :aria-label="menuLabel"
+              :aria-label="menuLabel ?? t('stage.chat.actions.menu')"
             >
               <div
                 :class="[

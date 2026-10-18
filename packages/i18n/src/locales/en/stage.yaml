@@ -102,10 +102,31 @@ chat:
     reading: 'Reading images…'
     description: 'Image attachment'
   actions:
+    menu: Message actions
+    copy: Copy
+    delete: Delete
+    context: View full context
     reply: Reply
     retry: Retry
     send: Send message
     stop: Stop response
+  context:
+    title: Full message context
+    description: Saved JSON includes the actual request, system prompt, history, memory, raw model output, and final response when recorded.
+    json: Complete message record JSON
+    close: Close
+    loading: Loading saved context…
+    failed: Failed to load the saved context.
+    retry: Retry
+    copy: Copy full JSON
+    copied: JSON copied
+    copy-failed: Failed to copy the JSON.
+    download: Download JSON
+    content-match: This older message matches a saved record by content. It has no stored message ID.
+    not-recorded: No saved record was found for this message. Its original request cannot be recovered from the current conversation.
+    unsupported-provider: This model provider does not support saved message context.
+    recording-disabled: Message recording is disabled. No request or response record is available.
+    ambiguous: More than one saved record matches this message. The original context cannot be identified safely.
   message:
     character-name:
       airi: AIRI
