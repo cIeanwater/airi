@@ -11,7 +11,7 @@ The AIRI application framework, character renderers, and provider interfaces com
 
 | Area | Current work | Details |
 | --- | --- | --- |
-| Local inference | Gemma 4 E2B QAT INT4 on the GPU, a 16K context, and JSON or SSE responses | [Model service](docs/ai/local-gemma4-int4.zh-CN.md) |
+| Local inference | Gemma 4 E2B QAT INT4 on the GPU, a 64K context, and JSON or SSE responses | [Model service](docs/ai/local-gemma4-int4.zh-CN.md) |
 | Long-term memory | Consent for each user and character, local retrieval, editing, deletion, and JSON import/export | [Memory package](packages/memory-local/README.md) |
 | Memory evaluation | Reproducible LongMemEval-S retrieval runs, pinned data, machine-readable reports, and stated limits | [Evaluation](packages/memory-local/benchmarks/README.md) |
 | Durable conversations | Wait for assistant storage before completion, export current messages, and reject stale account writes | [Persistence](docs/ai/adr/2026-10-16-local-chat-persistence.zh-CN.md) |
@@ -22,6 +22,7 @@ The AIRI application framework, character renderers, and provider interfaces com
 The local preset uses a 60 MB bilingual streaming Zipformer recognizer and Smart Turn v3.2 on the CPU.
 GPT-SoVITS v2ProPlus uses a synthetic reference for a bright Chinese student voice. Its FP16 synthesis core runs on the GPU.
 CPU feature models preserve GPU memory for Gemma and its context cache.
+The speech settings page lists local voice profiles for selection and preview. See the [voice configuration guide](docs/ai/local-voice-profiles.zh-CN.md).
 See the [voice measurements and limits](docs/ai/research/2026-10-18-compact-student-voice.zh-CN.md). ACT controls avatar expressions. This voice does not accept emotion instructions.
 
 ## Data that you can inspect
@@ -81,6 +82,7 @@ See the [protocol and reports](packages/memory-local/benchmarks/README.md) for b
 
 Recent integration records:
 
+- [Voice controls, audio normalization, messages view, and 64K context](docs/ai/validation/2026-10-18-voice-context-tuning.zh-CN.md)
 - [Gemma, streaming speech, interruption, and message context](docs/ai/validation/2026-10-18-streaming-context-companion.zh-CN.md)
 - [Fast local voice, direct startup, and local mode](docs/ai/validation/2026-10-17-fast-local-companion.zh-CN.md)
 - [Audio, model replies, and persistence](docs/ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)

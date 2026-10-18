@@ -112,16 +112,23 @@ chat:
     stop: 停止回复
   context:
     title: 消息完整上下文
-    description: 查看当时保存的 JSON，包括实际请求、系统提示词、历史消息、记忆、模型原始输出和最终回复（以已记录的字段为准）。
-    json: 消息完整记录 JSON
+    view: 上下文视图
+    messages: 消息
+    record: 完整记录
+    messages-description: 每轮显示当时保存的 model_input.messages 和聚合后的助手回复。未记录模型输入时使用 request.messages，null 表示未记录。
+    record-description: 查看全部已保存的诊断字段，包括原始输出、模板提示词和流式事件。“消息”视图隐藏这些细节。
+    messages-json: 模型消息 JSON
+    record-json: 消息完整记录 JSON
     close: 关闭
     loading: 正在读取已保存的上下文…
     failed: 无法读取已保存的上下文。
     retry: 重试
-    copy: 复制完整 JSON
+    copy-messages: 复制消息 JSON
+    copy-record: 复制完整记录 JSON
     copied: 已复制 JSON
     copy-failed: 无法复制 JSON。
-    download: 下载 JSON
+    download-messages: 下载消息 JSON
+    download-record: 下载完整记录 JSON
     content-match: 这条旧消息通过内容匹配到已保存的记录，没有记录消息 ID。
     not-recorded: 没有找到这条消息的原始记录。无法从当前对话还原当时的请求。
     unsupported-provider: 当前模型提供商不支持查看已保存的消息上下文。
@@ -277,7 +284,7 @@ status:
   listening: 正在听
   paused: AIRI 说话时暂停聆听
   transcribing: 正在转写
-  hearing-error: 语音转写出错了
+  hearing-error: 语音处理出错了
   no-transcript: 识别到的内容会显示在这里。
   signing-in: 请在浏览器中完成登录
   confirming: 正在确认登录

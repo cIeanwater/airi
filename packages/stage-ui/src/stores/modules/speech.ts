@@ -487,8 +487,8 @@ export const useSpeechStore = defineStore('speech', () => {
     if (!voiceId)
       return
 
-    let nextVoice: VoiceInfo | undefined
-    if (activeSpeechProvider.value === 'openai-compatible-audio-speech') {
+    let nextVoice = voices[activeSpeechProvider.value]?.find(voice => voice.id === voiceId)
+    if (!nextVoice && activeSpeechProvider.value === 'openai-compatible-audio-speech') {
       nextVoice = {
         id: voiceId,
         name: voiceId,
@@ -499,10 +499,6 @@ export const useSpeechStore = defineStore('speech', () => {
         gender: 'neutral',
       }
     }
-    else {
-      nextVoice = voices[activeSpeechProvider.value]?.find(voice => voice.id === voiceId)
-    }
-
     if (!nextVoice || isEqual(activeSpeechVoice.value, nextVoice))
       return
 

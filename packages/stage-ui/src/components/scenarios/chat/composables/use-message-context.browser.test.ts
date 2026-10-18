@@ -250,14 +250,14 @@ describe('message context with real sessions and providers', () => {
 
   it('closes the saved JSON dialog when the active session changes', async () => {
     const state = await context(true)
-    await expect.element(page.getByLabelText('Complete message record JSON')).toHaveTextContent('Saved personality before the edit')
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveTextContent('Saved personality before the edit')
     await state.sessions.createSession('default', { messages: [{ ...question, id: 'new-question' }] })
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('closes the saved JSON dialog when the account changes', async () => {
     const state = await context(true)
-    await expect.element(page.getByLabelText('Complete message record JSON')).toHaveTextContent('Saved personality before the edit')
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveTextContent('Saved personality before the edit')
     state.auth.user = { id: 'new-account', name: 'Synthetic user', email: 'test@example.com', emailVerified: true, createdAt: new Date(0), updatedAt: new Date(0) }
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
     await state.sessions.activateCurrentUser()

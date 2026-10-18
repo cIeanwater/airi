@@ -3,7 +3,7 @@ import type { GenerationRequest } from '@proj-airi/provider-inference'
 
 import type { ChatHistoryItem } from '../types/chat'
 
-import { array, literal, object, parse, picklist, record, string, unknown, variant } from 'valibot'
+import { array, literal, object, parse, picklist, record, safeParse, string, unknown, variant } from 'valibot'
 
 /** Saved model records are read only from an explicitly selected local model endpoint. */
 export type MessageContextResult
@@ -21,6 +21,33 @@ const resultSchema = variant('status', [
   object({ status: literal('found'), match: picklist(['id', 'content']), records: array(record(string(), unknown())) }),
   object({ status: literal('unavailable'), reason: picklist(['not-recorded', 'unsupported-provider', 'recording-disabled', 'ambiguous']) }),
 ])
+
+const messagesSchema = object({ messages: array(record(string(), unknown())) })
+const responseSchema = object({ choices: array(object({ message: record(string(), unknown()) })) })
+
+/**
+ * Projects saved exchanges without rebuilding messages or replaying stream chunks.
+ * Actual model input takes precedence over the received request. Missing fields remain null.
+ * Each saved request remains a separate round, including tool calls and tool results.
+ */
+export function projectMessageContext(records: Record<string, unknown>[]) {
+  return records.map((saved) => {
+    const modelInput = safeParse(messagesSchema, saved.model_input)
+    const request = safeParse(messagesSchema, saved.request)
+    const response = safeParse(responseSchema, saved.response)
+    let messages: Record<string, unknown>[] | null = null
+    if (modelInput.success)
+      messages = modelInput.output.messages
+    else if (request.success)
+      messages = request.output.messages
+
+    return {
+      messages,
+      // Both local services generate one choice and record its aggregated assistant message.
+      response: response.success ? response.output.choices[0]?.message ?? null : null,
+    }
+  })
+}
 
 function localContextEndpoint(request: GenerationRequest): URL | undefined {
   if (request.protocol !== 'chat-completions' || !['qwen3.5-2b-bf16', 'gemma4-e2b-int4'].includes(request.config.model ?? ''))

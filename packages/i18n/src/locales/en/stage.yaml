@@ -112,16 +112,23 @@ chat:
     stop: Stop response
   context:
     title: Full message context
-    description: Saved JSON includes the actual request, system prompt, history, memory, raw model output, and final response when recorded.
-    json: Complete message record JSON
+    view: Context view
+    messages: Messages
+    record: Complete record
+    messages-description: Each round shows the saved model_input.messages and aggregated assistant response. Missing model input uses request.messages. Null means unrecorded.
+    record-description: All saved diagnostic fields, including raw output, rendered prompts, and stream events. The messages view hides these details.
+    messages-json: Model messages JSON
+    record-json: Complete message record JSON
     close: Close
     loading: Loading saved context…
     failed: Failed to load the saved context.
     retry: Retry
-    copy: Copy full JSON
+    copy-messages: Copy messages JSON
+    copy-record: Copy complete record JSON
     copied: JSON copied
     copy-failed: Failed to copy the JSON.
-    download: Download JSON
+    download-messages: Download messages JSON
+    download-record: Download complete record JSON
     content-match: This older message matches a saved record by content. It has no stored message ID.
     not-recorded: No saved record was found for this message. Its original request cannot be recovered from the current conversation.
     unsupported-provider: This model provider does not support saved message context.
@@ -288,7 +295,7 @@ status:
   listening: Listening
   paused: Listening paused while AIRI speaks
   transcribing: Transcribing
-  hearing-error: Could not transcribe audio
+  hearing-error: Voice processing error
   no-transcript: Recognized speech will appear here.
   signing-in: Finish signing in in your browser
   confirming: Confirming sign-in

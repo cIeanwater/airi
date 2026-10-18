@@ -116,6 +116,7 @@ const displayedSpeechSource = computed({
 })
 
 const isOfficialSpeechSourceSelected = computed(() => displayedSpeechSource.value === OFFICIAL_SPEECH_PROVIDER_ID)
+const usesLocalVoiceProfiles = computed(() => activeSpeechProvider.value === 'openai-compatible-audio-speech' && activeSpeechModel.value === 'gpt-sovits-v2proplus')
 
 function streamingModelOptionId(modelId: string) {
   return `${STREAMING_MODEL_OPTION_PREFIX}${modelId}`
@@ -342,8 +343,8 @@ async function syncOpenAICompatibleSettings() {
   // Empty provider fields select the same OpenAI defaults as the provider form.
   await speechStore.selectProviderModel(
     activeSpeechProvider.value,
-    providerConfig?.model as string || 'tts-1',
-    providerConfig?.voice as string || 'alloy',
+    activeSpeechModel.value || providerConfig?.model as string || 'tts-1',
+    activeSpeechVoiceId.value || providerConfig?.voice as string || 'alloy',
   )
 }
 
@@ -802,9 +803,9 @@ async function handleDeleteProvider(providerId: string) {
           </div>
 
           <!-- Error state -->
-          <!-- Voice selection with RadioCardManySelect (skip for OpenAI Compatible) -->
+          <!-- Local compatible services can publish the same selectable catalog as other providers. -->
           <div
-            v-else-if="activeSpeechProvider !== 'openai-compatible-audio-speech' && displayedVoiceOptions.length > 0"
+            v-else-if="displayedVoiceOptions.length > 0"
             class="space-y-6"
           >
             <VoiceCardManySelect
@@ -852,7 +853,7 @@ async function handleDeleteProvider(providerId: string) {
           </Alert>
 
           <!-- Voice parameters -->
-          <div flex="~ col gap-4">
+          <div v-if="!usesLocalVoiceProfiles" flex="~ col gap-4">
             <FieldRange
               v-model="pitch"
               label="Pitch"
@@ -870,7 +871,7 @@ async function handleDeleteProvider(providerId: string) {
 
           <!-- Manual voice input when no voices are available or for OpenAI Compatible -->
           <div
-            v-if="activeSpeechProvider === 'openai-compatible-audio-speech' || !availableVoices[activeSpeechProvider] || availableVoices[activeSpeechProvider].length === 0"
+            v-if="!availableVoices[activeSpeechProvider] || availableVoices[activeSpeechProvider].length === 0"
             class="mt-2 space-y-6"
           >
             <FieldInput

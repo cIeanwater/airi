@@ -5,10 +5,11 @@
 更新日期：2026-10-18。
 
 默认方案使用 Zipformer small 中英双语流式转写、Smart Turn v3.2 判断说话是否结束、Gemma 4 E2B INT4 回复、GPT-SoVITS v2ProPlus 合成。
-默认声音为 `student-bright`，使用本机已有的原创合成参考声音，目标是年轻、明亮的中文学生声线。
+当前默认声音为 `anime-playful`，另有四种声音可在设置页试听、选择。
+它是原始合成参考的升调变体，具体效果与清晰度需试听确认，见[声音选择与参考配置](local-voice-profiles.zh-CN.md)。
 声线与韵律由参考声音控制，不支持自然语言情绪指令。ACT 继续驱动人物表情。
 
-ASR 与说话结束判断使用 CPU。Gemma 使用 Vulkan GPU 推理，默认上下文为 16,384 token，KV 缓存为 Q8。
+ASR 与说话结束判断使用 CPU。Gemma 使用 Vulkan GPU 推理，默认上下文为 65,536 tokens，KV 缓存为 Q8。
 TTS 合成核心使用 CUDA FP16，辅助特征模型使用 CPU。合成核心约 176M 参数，CPU 辅助模型另计。
 声线选择、固定版本、显存与实测延迟见[小型学生声线研究](research/2026-10-18-compact-student-voice.zh-CN.md)。
 Gemma 的准备与运行方式见[Gemma INT4](local-gemma4-int4.zh-CN.md)。
@@ -21,7 +22,7 @@ Gemma 的准备与运行方式见[Gemma INT4](local-gemma4-int4.zh-CN.md)。
 | 实时转写 | `ws://127.0.0.1:18087/v1/stream`，在对应 Provider 配置 `localStreamingUrl` |
 | 对话 | `http://127.0.0.1:18083/v1/`，`gemma4-e2b-int4`，本地记录网关 |
 | 对话推理内核 | `http://127.0.0.1:18088/`，llama.cpp Vulkan，仅供本地网关使用 |
-| 语音输出 | `http://127.0.0.1:18084/v1/`，`gpt-sovits-v2proplus`，`student-bright` |
+| 语音输出 | `http://127.0.0.1:18084/v1/`，`gpt-sovits-v2proplus`，`anime-playful` |
 
 此前 MOSS Nano、Qwen BF16、Whisper 与 Qwen3-TTS 1.7B 的记录保留为历史。
 见[轻量语音研究](research/2026-10-17-fast-local-voice.zh-CN.md)、[原轻量方案验收](validation/2026-10-17-fast-local-companion.zh-CN.md)、[输入研究](research/2026-10-17-modern-voice-input.zh-CN.md)和[输出研究](research/2026-10-17-expressive-tts.zh-CN.md)。
@@ -56,7 +57,8 @@ python scripts/start-local-voice.py
 | --- | --- |
 | `--llm gemma` | 默认 Gemma INT4，启动推理内核与消息记录网关 |
 | `--llm qwen` | 显式运行已准备的 Qwen3.5-2B BF16 |
-| `--context-size 16384` | Gemma 上下文大小，范围为 4,096 至 131,072 |
+| `--context-size 65536` | Gemma 默认 64K 上下文，范围为 4,096 至 131,072 |
+| `--voice-profiles PATH` | 使用本地声音配置，界面可选择其中的声音 |
 | `--tts gpt-sovits` | 默认学生声线，需要已准备的 CUDA 运行环境 |
 | `--tts moss` | 显式运行原 MOSS Nano CPU 服务，需要其独立环境 |
 | `--no-message-recording` | 关闭完整模型请求 JSON，保留聊天历史 |

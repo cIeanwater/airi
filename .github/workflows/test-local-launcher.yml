@@ -12,6 +12,8 @@ on:
       - scripts/test-local-gemma-gateway.py
       - scripts/serve-local-gpt-sovits.py
       - scripts/test-local-gpt-sovits.py
+      - configs/local-voice-profiles.json
+      - scripts/prepare-local-voice-references.py
       - scripts/serve-qwen35-2b-bf16.py
       - scripts/test-local-chat-output.py
       - scripts/local-message-context.py
@@ -28,6 +30,8 @@ on:
       - scripts/test-local-gemma-gateway.py
       - scripts/serve-local-gpt-sovits.py
       - scripts/test-local-gpt-sovits.py
+      - configs/local-voice-profiles.json
+      - scripts/prepare-local-voice-references.py
       - scripts/serve-qwen35-2b-bf16.py
       - scripts/test-local-chat-output.py
       - scripts/local-message-context.py

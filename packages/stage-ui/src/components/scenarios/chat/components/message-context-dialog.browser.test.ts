@@ -25,9 +25,11 @@ vi.mock('../composables/use-message-context', () => ({ useMessageContext: () => 
 const stores: ReturnType<typeof createPinia>[] = []
 beforeEach(async () => {
   load.mockReset()
+  selectionKey.value = 'local-session'
   await page.viewport(1280, 720)
 })
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const store of stores.splice(0))
     disposePinia(store)
 })
@@ -51,7 +53,21 @@ function savedRecord(prompt = 'Original saved prompt') {
 }
 
 describe('saved message context', () => {
-  it('opens the selected message from its context menu and shows the saved complete JSON', async () => {
+  it('shows model messages and the aggregated assistant response without stream envelopes by default', async () => {
+    const record = {
+      ...savedRecord(),
+      model_input: { messages: [{ role: 'user', content: 'Actual forwarded question' }] },
+      stream_events: [{ object: 'chat.completion.chunk', choices: [{ delta: { content: 'Final answer' } }] }],
+    }
+    load.mockResolvedValue({ status: 'found', match: 'id', records: [record] })
+    render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
+    await expect.poll(() => page.getByLabelText('Model messages JSON').element().textContent).toBe(JSON.stringify([{
+      messages: record.model_input.messages,
+      response: record.response.choices[0].message,
+    }], null, 2))
+  })
+
+  it('opens the selected message, defaults to saved messages, and keeps the full record available', async () => {
     const records = [savedRecord()]
     load.mockResolvedValue({ status: 'found', match: 'id', records })
     const view = render(ChatHistory, {
@@ -62,16 +78,24 @@ describe('saved message context', () => {
     await view.getByText('First answer', { exact: true }).click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'View full context' }).click()
     await expect.element(page.getByRole('dialog', { name: 'Full message context' })).toBeVisible()
-    await expect.poll(() => page.getByLabelText('Complete message record JSON').element().textContent).toBe(JSON.stringify(records, null, 2))
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveTextContent('Original saved prompt')
+    await expect.element(page.getByRole('button', { name: 'Messages', exact: true })).toHaveAttribute('aria-pressed', 'true')
     expect(load).toHaveBeenCalledWith(first)
     await expect.element(page.getByRole('button', { name: 'Close', exact: true })).toHaveFocus()
     await userEvent.tab()
     expect(page.getByRole('dialog').element().contains(document.activeElement)).toBe(true)
     await userEvent.tab()
-    await expect.element(page.getByLabelText('Complete message record JSON')).toHaveFocus()
-    await page.getByRole('button', { name: 'Copy full JSON' }).click()
+    await expect.element(page.getByRole('button', { name: 'Complete record', exact: true })).toHaveFocus()
+    await userEvent.tab()
+    expect(page.getByRole('dialog').element().contains(document.activeElement)).toBe(true)
+    await userEvent.tab()
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveFocus()
+    await page.getByRole('button', { name: 'Copy messages JSON' }).click()
     await expect.element(page.getByRole('button', { name: 'JSON copied' })).toBeVisible()
-    await expect.element(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Complete record', exact: true }).click()
+    await expect.poll(() => page.getByLabelText('Complete message record JSON').element().textContent).toBe(JSON.stringify(records, null, 2))
+    await expect.element(page.getByRole('button', { name: 'Copy complete record JSON' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Download complete record JSON' })).toBeEnabled()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('dialog', { name: 'Full message context' })).not.toBeInTheDocument()
   })
@@ -83,12 +107,49 @@ describe('saved message context', () => {
     const view = render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
     await expect.element(page.getByRole('status')).toHaveTextContent('Loading saved context')
     await view.rerender({ message: second })
-    await expect.element(page.getByLabelText('Complete message record JSON')).toHaveTextContent('Second saved prompt')
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveTextContent('Second saved prompt')
     resolveFirst?.({ status: 'found', match: 'id', records: [savedRecord('Stale first prompt')] })
     await Promise.resolve()
     await nextTick()
     await expect.poll(() => load.mock.calls.length).toBe(2)
-    await expect.element(page.getByLabelText('Complete message record JSON')).not.toHaveTextContent('Stale first prompt')
+    await expect.element(page.getByLabelText('Model messages JSON')).not.toHaveTextContent('Stale first prompt')
+  })
+
+  it('copies and downloads exactly the selected view without changing the saved record', async () => {
+    const records = [{ ...savedRecord(), stream_events: [{ object: 'chat.completion.chunk' }] }]
+    const messages = [{ messages: records[0].request.messages, response: records[0].response.choices[0].message }]
+    const original = JSON.stringify(records)
+    load.mockResolvedValue({ status: 'found', match: 'id', records })
+    const copy = vi.spyOn(navigator.clipboard, 'writeText')
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
+    await page.getByRole('button', { name: 'Copy messages JSON' }).click()
+    expect(copy).toHaveBeenLastCalledWith(JSON.stringify(messages, null, 2))
+    await page.getByRole('button', { name: 'Download messages JSON' }).click()
+    expect(download.mock.contexts[0].download).toBe('humanning-message-messages.json')
+    expect(await fetch(download.mock.contexts[0].href).then(response => response.text())).toBe(JSON.stringify(messages, null, 2))
+
+    await page.getByRole('button', { name: 'Complete record', exact: true }).click()
+    await page.getByRole('button', { name: 'Copy complete record JSON' }).click()
+    expect(copy).toHaveBeenLastCalledWith(JSON.stringify(records, null, 2))
+    await page.getByRole('button', { name: 'Download complete record JSON' }).click()
+    expect(download.mock.contexts[1].download).toBe('humanning-message-record.json')
+    expect(await fetch(download.mock.contexts[1].href).then(response => response.text())).toBe(JSON.stringify(records, null, 2))
+    expect(JSON.stringify(records)).toBe(original)
+  })
+
+  it('resets to messages when selecting another message or reopening the dialog', async () => {
+    load.mockResolvedValue({ status: 'found', match: 'id', records: [savedRecord()] })
+    const view = render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
+    await page.getByRole('button', { name: 'Complete record', exact: true }).click()
+    await expect.element(page.getByLabelText('Complete message record JSON')).toBeVisible()
+    await view.rerender({ message: second })
+    await expect.element(page.getByLabelText('Model messages JSON')).toBeVisible()
+    await page.getByRole('button', { name: 'Complete record', exact: true }).click()
+    await view.rerender({ open: false })
+    await view.rerender({ open: true })
+    await expect.element(page.getByLabelText('Model messages JSON')).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Copy messages JSON' })).toBeVisible()
   })
 
   it.each([
@@ -114,7 +175,7 @@ describe('saved message context', () => {
     render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
     await expect.element(page.getByRole('alert')).toHaveTextContent('Local service unavailable')
     await page.getByRole('button', { name: 'Retry', exact: true }).click()
-    await expect.element(page.getByLabelText('Complete message record JSON')).toHaveTextContent('Original saved prompt')
+    await expect.element(page.getByLabelText('Model messages JSON')).toHaveTextContent('Original saved prompt')
     expect(load).toHaveBeenNthCalledWith(2, first)
   })
 
@@ -127,14 +188,14 @@ describe('saved message context', () => {
     load.mockResolvedValue({ status: 'unavailable', reason })
     render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
     await expect.element(page.getByRole('status')).toHaveTextContent(text)
-    await expect.element(page.getByRole('button', { name: 'Copy full JSON' })).not.toBeInTheDocument()
+    await expect.element(page.getByRole('button', { name: 'Copy messages JSON' })).not.toBeInTheDocument()
   })
 
   it('keeps long JSON inside the dialog at a narrow viewport and marks content matches', async () => {
     load.mockResolvedValue({ status: 'found', match: 'content', records: [savedRecord('Long prompt '.repeat(2000))] })
     await page.viewport(320, 568)
     render(MessageContextDialog, { props: { open: true, message: first }, global: { plugins: plugins() } })
-    await expect.element(page.getByLabelText('Complete message record JSON')).toBeVisible()
+    await expect.element(page.getByLabelText('Model messages JSON')).toBeVisible()
     await expect.element(page.getByRole('status')).toHaveTextContent('matches a saved record by content')
     const dialog = page.getByRole('dialog').element().getBoundingClientRect()
     expect(dialog.left).toBeGreaterThanOrEqual(0)
