@@ -77,6 +77,11 @@ class MessageRecorder:
         for target in sorted(records, key=lambda path: path.name, reverse=True)[self.max_records:]:
             target.unlink()
 
+    def read_context(self, query: dict) -> dict:
+        with self.lock:
+            return _context_module.read_local_message_context(self.directory, query,
+                max_age_days=self.max_age_days, max_records=self.max_records)
+
     def write(self, record: dict) -> None:
         if self.directory is None:
             return
@@ -89,7 +94,18 @@ class MessageRecorder:
             with self.lock:
                 try:
                     temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-                    temporary.replace(target)
+                    # NOTICE:
+                    # Windows readers can briefly block atomic replacement without FILE_SHARE_DELETE.
+                    # See https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea.
+                    # Remove retries when supported readers no longer block replacement.
+                    for attempt in range(6):
+                        try:
+                            temporary.replace(target)
+                            break
+                        except PermissionError as error:
+                            if os.name != "nt" or getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 5:
+                                raise
+                            time.sleep(0.01 * 2 ** attempt)
                 finally:
                     temporary.unlink(missing_ok=True)
                 self.prune()
@@ -406,8 +422,7 @@ def main() -> int:
                     if not 0 < length <= MAX_BODY_BYTES:
                         raise ValueError("The JSON request must be between 1 byte and 1 MiB")
                     query = json.loads(self.rfile.read(length), parse_constant=reject_nonfinite_json)
-                    result = _context_module.read_local_message_context(recorder.directory, query,
-                        max_age_days=recorder.max_age_days, max_records=recorder.max_records)
+                    result = recorder.read_context(query)
                     self.response(200, result)
                 except (ValueError, TypeError) as error:
                     self.response(400, {"error": {"message": str(error)}})

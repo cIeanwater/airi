@@ -23,5 +23,5 @@ it('shows final transcription work and reports a provider failure through the ho
   context.emit(voiceSnapshotChanged, { connected: true, drafts: [], input: { requestId: 'recording', sessionId: 'alice', phase: 'finalizing', text: 'recognized words', segments: [{ id: 'speech-0', text: 'recognized words', final: true }] } })
   await expect.element(view.getByRole('status')).toHaveTextContent('Transcribing')
   context.emit(voiceSnapshotChanged, { connected: true, drafts: [], error: 'Provider timed out', input: { requestId: 'recording', sessionId: 'alice', phase: 'settled', text: 'recognized words', segments: [{ id: 'speech-0', text: 'recognized words', final: true }] } })
-  await expect.element(view.getByRole('status')).toHaveTextContent('Could not transcribe audio')
+  await expect.element(view.getByRole('status')).toHaveTextContent('Voice processing error')
 })

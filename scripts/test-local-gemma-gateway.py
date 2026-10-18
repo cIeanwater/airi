@@ -153,11 +153,12 @@ class GemmaGatewayTests(unittest.TestCase):
     def record(self):
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            paths = list(self.directory.glob("*.json"))
-            if paths:
-                value = json.loads(paths[0].read_text(encoding="utf-8"))
-                if value.get("status") != "started":
-                    return value
+            with self.recorder.lock:
+                paths = list(self.directory.glob("*.json"))
+                if paths:
+                    value = json.loads(paths[0].read_text(encoding="utf-8"))
+                    if value.get("status") != "started":
+                        return value
             time.sleep(0.01)
         self.fail("The gateway did not finish its record")
 

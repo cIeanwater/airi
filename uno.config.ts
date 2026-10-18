@@ -193,8 +193,13 @@ export function sharedUnoConfig() {
           '**/ui/**/*.{vue,js,ts}', // THIS TOO
         ],
         exclude: [
-
           /\/node_modules\//, // DO NOT SCAN THE BLACK HOLE
+          // NOTICE:
+          // Source SFCs already contain their template and script utilities.
+          // Attributify mistakes compiled render comparisons for HTML attributes.
+          // Source: docs/ai/validation/2026-10-18-unocss-extraction.zh-CN.md.
+          // Remove this exclusion when attributify rejects compiled render code.
+          /\.vue\?vue&type=script(?:&|$)/,
         ],
       },
     },

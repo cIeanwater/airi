@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -79,6 +80,77 @@ class MessageRecorderTests(unittest.TestCase):
             self.assertEqual(recorder.describe()["last_error"], "PermissionError")
             self.assertEqual(next(root.glob("*.json")).read_text(encoding="utf-8"), previous)
             self.assertEqual(list(root.glob("*.tmp")), [])
+
+    @unittest.skipUnless(os.name == "nt", "Windows readers can block atomic replacement")
+    def test_atomic_replace_recovers_after_reader_releases_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recorder = SERVER.MessageRecorder(root, 7, 1000)
+            record = {**self.record(), "status": "started"}
+            recorder.write(record)
+            target = next(root.glob("*.json"))
+            blocked = threading.Event()
+            replace = Path.replace
+
+            def notify_replace(path, destination):
+                try:
+                    return replace(path, destination)
+                except PermissionError:
+                    blocked.set()
+                    raise
+
+            writer = threading.Thread(target=recorder.write, args=({**record, "status": "ok"},))
+            with patch.object(Path, "replace", new=notify_replace):
+                try:
+                    with target.open("r", encoding="utf-8"):
+                        writer.start()
+                        self.assertTrue(blocked.wait(1), "The reader did not block replacement")
+                finally:
+                    writer.join(2)
+            self.assertFalse(writer.is_alive())
+            self.assertIsNone(recorder.describe()["last_error"])
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["status"], "ok")
+            self.assertEqual(list(root.glob("*.tmp")), [])
+
+    @unittest.skipUnless(os.name == "nt", "Retry Windows sharing errors only")
+    def test_persistent_sharing_error_is_bounded_and_next_write_recovers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recorder = SERVER.MessageRecorder(root, 7, 1000)
+            record = {**self.record(), "status": "started"}
+            recorder.write(record)
+            blocked = PermissionError("synthetic sharing violation")
+            blocked.winerror = 32
+            with patch.object(Path, "replace", side_effect=blocked) as replace, patch.object(SERVER.time, "sleep") as sleep:
+                recorder.write({**record, "status": "ok"})
+            self.assertEqual(replace.call_count, 6)
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.01, 0.02, 0.04, 0.08, 0.16])
+            self.assertEqual(recorder.describe()["last_error"], "PermissionError")
+            self.assertEqual(json.loads(next(root.glob("*.json")).read_text(encoding="utf-8"))["status"], "started")
+            self.assertEqual(list(root.glob("*.tmp")), [])
+            recorder.write({**record, "status": "ok"})
+            self.assertIsNone(recorder.describe()["last_error"])
+            self.assertEqual(json.loads(next(root.glob("*.json")).read_text(encoding="utf-8"))["status"], "ok")
+
+    def test_context_lookup_holds_writer_lock_and_releases_it_after_errors(self):
+        recorder = SERVER.MessageRecorder(None, 7, 1000)
+        query = {"message_id": "synthetic-message"}
+        result = {"status": "unavailable", "reason": "recording-disabled"}
+
+        def read(directory, actual_query, **limits):
+            self.assertTrue(recorder.lock.locked())
+            self.assertIsNone(directory)
+            self.assertEqual(actual_query, query)
+            self.assertEqual(limits, {"max_age_days": 7, "max_records": 1000})
+            return result
+
+        with patch.object(SERVER._context_module, "read_local_message_context", side_effect=read):
+            self.assertEqual(recorder.read_context(query), result)
+        self.assertFalse(recorder.lock.locked())
+        with patch.object(SERVER._context_module, "read_local_message_context", side_effect=ValueError("synthetic query")):
+            with self.assertRaisesRegex(ValueError, "synthetic query"):
+                recorder.read_context(query)
+        self.assertFalse(recorder.lock.locked())
 
     def test_rejects_nonpositive_retention(self):
         for days, count in [(0, 1000), (7, 0)]:

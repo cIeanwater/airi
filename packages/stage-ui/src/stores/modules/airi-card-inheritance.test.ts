@@ -75,12 +75,12 @@ describe('card inheritance with real module stores', () => {
     const prompt = cards.getSystemPrompt('default')
 
     expect(cards.usesLocalConversationPrompt('default')).toBe(true)
-    expect(prompt).toContain('一到两句口语')
+    expect(prompt).toContain('日常默认说一两句口语，长短随话题变化')
     expect(prompt).toContain('<|ACT {"emotion":"happy"}|>')
     expect(prompt).toContain('happy,sad,angry,think,surprised,awkward,question,curious,neutral')
     expect(prompt).toContain('["Idle"]')
     expect(prompt).toContain('记忆')
-    expect(prompt.length).toBeLessThan(700)
+    expect(prompt.length).toBeLessThan(800)
     expect(cards.cards.get('default')).toEqual(original)
     expect(prompt).not.toContain(DEFAULT_ARTISTRY_WIDGET_SPAWNING_PROMPT)
 

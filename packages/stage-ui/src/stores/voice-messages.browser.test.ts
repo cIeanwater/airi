@@ -49,7 +49,8 @@ describe('voice messages host', () => {
     const command = defineInvoke(getSpeechBusContext(), voiceMessageCommand)
 
     await command({ type: 'record', id: 'message', sessionId: 'alice', replyToMessageId: 'reply-target' })
-    await expect.poll(() => latest()[0]?.phase).toBe('capturing')
+    // Browser microphone and AudioWorklet startup can exceed the default polling window during the full suite.
+    await expect.poll(() => latest()[0]?.phase, { timeout: 5_000 }).toBe('capturing')
     expect(store.isRecording).toBe(true)
 
     // The test has no chat session or provider, so the send fails after encoding. The host must keep the recording.
@@ -67,7 +68,7 @@ describe('voice messages host', () => {
     const command = defineInvoke(getSpeechBusContext(), voiceMessageCommand)
 
     await command({ type: 'record', id: 'message', sessionId: 'alice' })
-    await expect.poll(() => latest()[0]?.phase).toBe('capturing')
+    await expect.poll(() => latest()[0]?.phase, { timeout: 5_000 }).toBe('capturing')
     await command({ type: 'finish', id: 'message' })
 
     await expect.poll(() => latest()[0]?.phase).toBe('ready')
