@@ -5,6 +5,7 @@ The original start-local-airi.ps1 entry remains available for its separate setup
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -108,7 +109,9 @@ def main():
     parser.add_argument("--models-dir", type=Path, default=ROOT / "local-models")
     parser.add_argument("--llm", choices=("gemma", "qwen"), default="gemma")
     parser.add_argument("--tts", choices=("gpt-sovits", "moss"), default="gpt-sovits")
-    parser.add_argument("--context-size", type=int, default=16384)
+    parser.add_argument("--context-size", type=int, default=65536)
+    parser.add_argument("--voice-profiles", type=Path, default=ROOT / "configs/local-voice-profiles.json",
+                        help="Local GPT-SoVITS voice IDs, reference WAV files, exact text, and speed")
     parser.add_argument("--node-path", type=Path, default=os.environ.get("HUMANNING_NODE") or None,
                         help="Use an explicit Node.js executable for the desktop")
     parser.add_argument("--services-only", action="store_true")
@@ -121,6 +124,7 @@ def main():
         parser.error("context-size must be between 4096 and 131072 tokens")
     tools = args.tools_dir.resolve()
     models = args.models_dir.resolve()
+    args.voice_profiles = args.voice_profiles.expanduser().resolve()
     asr_root = tools / "fast-asr"
     tts_root = tools / ("gpt-sovits-v2proplus" if args.tts == "gpt-sovits" else "moss-tts-nano")
     turn_root = tools / "smart-turn-v3.2"
@@ -142,10 +146,20 @@ def main():
         turn_root / "smart-turn-v3.2-cpu.onnx",
     ]
     if args.tts == "gpt-sovits":
-        required.extend([ROOT / "scripts/serve-local-gpt-sovits.py",
-                         tools / "modern-voice-2026-10-17/vivian-curious.wav",
+        required.extend([ROOT / "scripts/serve-local-gpt-sovits.py", args.voice_profiles,
                          tts_root / "publisher-manifest.json",
                          tts_root / "GPT_SoVITS/TTS_infer_pack/TTS.py"])
+        if args.voice_profiles.is_file():
+            try:
+                profiles = json.loads(args.voice_profiles.read_text(encoding="utf-8"))["voices"]
+                if not isinstance(profiles, list) or not profiles:
+                    raise ValueError("The voice list is empty")
+                for profile in profiles:
+                    if not isinstance(profile["reference_audio"], str) or not profile["reference_audio"].strip():
+                        raise ValueError("A reference path is missing")
+                    required.append((args.voice_profiles.parent / profile["reference_audio"]).resolve())
+            except (ValueError, TypeError, KeyError) as error:
+                raise RuntimeError(f"Invalid voice reference paths in {args.voice_profiles}. Check each reference_audio field.") from error
         required.extend(tts_root / "GPT_SoVITS/pretrained_models" / name for name in (
             "s1v3.ckpt", "v2Pro/s2Gv2ProPlus.pth", "sv/pretrained_eres2netv2w24s4ep4.ckpt",
             "chinese-roberta-wwm-ext-large/pytorch_model.bin", "chinese-roberta-wwm-ext-large/config.json",
@@ -206,8 +220,7 @@ def start_services(args, tools, models, logs, llm_python, asr_python, turn_pytho
         llm_arguments.extend(["--record-messages-dir", str(tools / "airi-message-records")])
     if args.tts == "gpt-sovits":
         tts_arguments = [str(tts_python), "-u", str(ROOT / "scripts/serve-local-gpt-sovits.py"),
-                         "--runtime-dir", str(tts_root), "--reference",
-                         str(tools / "modern-voice-2026-10-17/vivian-curious.wav"),
+                         "--runtime-dir", str(tts_root), "--voice-profiles", str(args.voice_profiles),
                          "--port", "18084", "--threads", "4"]
         tts_id = "gpt-sovits-v2proplus"
     else:
@@ -245,8 +258,13 @@ def start_services(args, tools, models, logs, llm_python, asr_python, turn_pytho
                 if name == "llm-engine":
                     catalog = get_health(port, "/v1/models")
                     return (isinstance(health, dict) and health.get("status") == "ok"
-                            and isinstance(catalog, dict) and any(model.get("id") == expected_model for model in catalog.get("data", [])))
+                            and isinstance(catalog, dict) and any(model.get("id") == expected_model
+                                and model.get("meta", {}).get("n_ctx") == args.context_size for model in catalog.get("data", [])))
                 if expected_model and isinstance(health, dict):
+                    if name == "tts" and args.tts == "gpt-sovits" and health.get("status") == "ready" and health.get("model") == expected_model:
+                        requested = hashlib.sha256(args.voice_profiles.read_bytes()).hexdigest()
+                        if health.get("voice_profiles_sha256") != requested:
+                            raise RuntimeError("Voice profiles changed. Restart the local GPT-SoVITS service before reusing it. Then run Start-Humanning.cmd again.")
                     return health.get("status") == "ready" and health.get("model_id", health.get("model")) == expected_model
                 if name == "desktop":
                     return isinstance(health, list) and any("localhost:5173/" in page.get("url", "") for page in health)

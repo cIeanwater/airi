@@ -14,10 +14,10 @@ def health(port):
         return json.load(response)
 
 
-def generate(port, text, output):
+def generate(port, text, output, voice):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     started = time.perf_counter()
-    connection.request("POST", "/v1/audio/speech", json.dumps({"model": "gpt-sovits-v2proplus", "voice": "student-bright",
+    connection.request("POST", "/v1/audio/speech", json.dumps({"model": "gpt-sovits-v2proplus", "voice": voice,
                                                             "input": text, "stream": True, "response_format": "pcm"}))
     response = connection.getresponse()
     if response.status != 200:
@@ -45,17 +45,17 @@ def generate(port, text, output):
         gap = max(0, arrival["seconds"] - scheduled)
         underrun += gap
         scheduled = max(scheduled, arrival["seconds"]) + arrival["audio_seconds"]
-    return {"file": str(output.resolve()), "text": text, "sample_rate": rate, "channels": channels,
+    return {"file": str(output.resolve()), "voice": voice, "text": text, "sample_rate": rate, "channels": channels,
             "first_pcm_seconds": round(arrivals[0]["seconds"], 4), "generation_seconds": round(elapsed, 4),
             "audio_seconds": round(duration, 4), "rtf": round(elapsed / duration, 4),
             "transport_underrun_seconds_at_100ms_buffer": round(underrun, 4),
             "arrivals": [{key: round(value, 4) for key, value in arrival.items()} for arrival in arrivals]}
 
 
-def cancel(port, after_pcm):
+def cancel(port, after_pcm, voice):
     before = health(port)["requests"]["cancelled"]
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
-    connection.request("POST", "/v1/audio/speech", json.dumps({"model": "gpt-sovits-v2proplus", "voice": "student-bright",
+    connection.request("POST", "/v1/audio/speech", json.dumps({"model": "gpt-sovits-v2proplus", "voice": voice,
                                                             "input": "今天放学以后，我们一起去看看新开的书店，然后去操场走走，再回家写作业，好不好呀？",
                                                             "stream": True, "response_format": "pcm"}))
     response = None
@@ -82,14 +82,16 @@ def main():
     parser.add_argument("--port", type=int, default=18089)
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parents[2] / ".tools/expressive-voice-2026-10-18")
     parser.add_argument("--asr-port", type=int, default=18086)
+    parser.add_argument("--voice", help="Use a configured voice ID. Omit to test the service default")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     report = {"synthetic_audio": True, "initial_health": health(args.port), "samples": []}
+    voice = args.voice or report["initial_health"]["voice"]
     for name, text in (("greeting", "你回来啦！今天过得怎么样？要不要先坐下来，和我聊一会儿？"),
                        ("school", "今天放学以后，我们一起去看看新开的书店，好不好呀？"),
                        ("gentle", "嗯，我在听。今天很辛苦吧？先别着急，我们慢慢说。")):
         output = args.output_dir / f"gpt-student-{name}.wav"
-        result = generate(args.port, text, output)
+        result = generate(args.port, text, output, voice)
         if args.asr_port:
             import requests
             with output.open("rb") as audio:
@@ -100,8 +102,8 @@ def main():
                 result["asr"] = response.json()
         report["samples"].append(result)
         print(json.dumps(result, ensure_ascii=True), flush=True)
-    report["cancellation"] = [cancel(args.port, False), cancel(args.port, True)]
-    report["recovery"] = generate(args.port, "我听到啦，你接着说，我在呢。", args.output_dir / "gpt-student-after-cancel.wav")
+    report["cancellation"] = [cancel(args.port, False, voice), cancel(args.port, True, voice)]
+    report["recovery"] = generate(args.port, "我听到啦，你接着说，我在呢。", args.output_dir / "gpt-student-after-cancel.wav", voice)
     report["final_health"] = health(args.port)
     (args.output_dir / "gpt-benchmark.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"cancellation": report["cancellation"], "final_health": report["final_health"]}), flush=True)

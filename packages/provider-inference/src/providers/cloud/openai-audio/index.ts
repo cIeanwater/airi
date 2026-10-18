@@ -1,7 +1,8 @@
-import type { ProviderContext, ProviderTranslator } from '../../../types'
+import type { ProviderContext, ProviderTranslator, VoiceInfo } from '../../../types'
 
 import { createOpenAI } from '@xsai-ext/providers/create'
 import { listModels } from '@xsai/model'
+import { array, literal, maxLength, object, optional, parse, pipe, string } from 'valibot'
 import { z } from 'zod'
 
 import { defineProvider } from '../../registry'
@@ -68,6 +69,39 @@ function createTranscriptionProvider(config: AudioConfig) {
     ...extraOptions,
   })
   return provider
+}
+
+const localVoiceCatalogSchema = object({
+  model: literal('gpt-sovits-v2proplus'),
+  voices: pipe(array(object({
+    id: pipe(string(), maxLength(48)),
+    name: pipe(string(), maxLength(80)),
+    description: optional(pipe(string(), maxLength(240))),
+    gender: optional(string()),
+  })), maxLength(12)),
+})
+
+/** The reviewed local speech service publishes choices. Other compatible APIs retain manual voice entry. */
+async function listLocalVoices(config: OpenAICompatibleAudioConfig, model?: string, signal?: AbortSignal): Promise<VoiceInfo[]> {
+  if (model !== 'gpt-sovits-v2proplus' || !config.baseUrl)
+    return []
+  const url = new URL(normalizeBaseUrl(config.baseUrl))
+  if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password || url.search || url.hash)
+    return []
+  const timeout = AbortSignal.timeout(10_000)
+  const response = await fetch(new URL('audio/voices', url), {
+    credentials: 'omit',
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  })
+  if (!response.ok)
+    throw new Error(`Local voice discovery failed: HTTP ${response.status}`)
+  const catalog = parse(localVoiceCatalogSchema, await response.json())
+  return catalog.voices.map(voice => ({
+    ...voice,
+    provider: 'openai-compatible-audio-speech',
+    compatibleModels: [catalog.model],
+    languages: [{ code: 'zh', title: 'Chinese' }],
+  }))
 }
 
 function createAudioValidators<TConfig extends AudioConfig>() {
@@ -218,8 +252,8 @@ export const providerOpenAICompatibleAudioSpeech = defineProvider<OpenAICompatib
   validationRequiredWhen: config => Boolean(config.apiKey?.trim() && config.baseUrl?.trim()),
   validators: createAudioValidators<OpenAICompatibleAudioConfig>(),
   extraMethods: {
-    voiceCatalogConfig: () => ({}),
-    listVoices: async () => [],
+    voiceCatalogConfig: config => ({ baseUrl: normalizeBaseUrl(config.baseUrl) }),
+    listVoices: (config, _provider, model, signal) => listLocalVoices(config, model, signal),
     listModels: async (config) => {
       const apiKey = config.apiKey?.trim() ?? ''
       const baseUrl = normalizeBaseUrl(config.baseUrl)

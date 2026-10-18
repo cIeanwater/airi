@@ -9,6 +9,7 @@ import { computed, onScopeDispose, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useDownload } from '../../../../composables/download'
+import { projectMessageContext } from '../../../../libs/local-message-context'
 import { useMessageContext } from '../composables/use-message-context'
 
 const props = defineProps<{
@@ -22,9 +23,17 @@ const loading = shallowRef(false)
 const loadError = shallowRef('')
 const copyError = shallowRef('')
 const copied = shallowRef(false)
+const view = shallowRef<'messages' | 'record'>('messages')
 let requestSequence = 0
+let copySequence = 0
 
-const json = computed(() => result.value?.status === 'found' ? JSON.stringify(result.value.records, null, 2) : '')
+const json = computed(() => {
+  if (result.value?.status !== 'found')
+    return ''
+  const records = result.value.records
+  return JSON.stringify(view.value === 'messages' ? projectMessageContext(records) : records, null, 2)
+})
+const jsonLabel = computed(() => t(`stage.chat.context.${view.value}-json`))
 const unavailableKey = computed(() => result.value?.status === 'unavailable' ? `stage.chat.context.${result.value.reason}` : '')
 
 async function loadContext() {
@@ -33,6 +42,7 @@ async function loadContext() {
   loadError.value = ''
   copyError.value = ''
   copied.value = false
+  view.value = 'messages'
   loading.value = false
   if (!open.value || !props.message)
     return
@@ -55,6 +65,11 @@ async function loadContext() {
 }
 
 watch([open, () => props.message], () => void loadContext(), { immediate: true })
+watch(view, () => {
+  copySequence++
+  copied.value = false
+  copyError.value = ''
+}, { flush: 'sync' })
 // A saved record belongs to the account and conversation that opened it.
 watch(selectionKey, () => {
   open.value = false
@@ -64,21 +79,22 @@ onScopeDispose(() => requestSequence++)
 
 async function copyJson() {
   const sequence = requestSequence
+  const copy = ++copySequence
   copyError.value = ''
   try {
     await navigator.clipboard.writeText(json.value)
-    if (sequence === requestSequence)
+    if (sequence === requestSequence && copy === copySequence)
       copied.value = true
   }
   catch (error) {
-    if (sequence === requestSequence)
+    if (sequence === requestSequence && copy === copySequence)
       copyError.value = errorMessageFrom(error) ?? t('stage.chat.context.copy-failed')
   }
 }
 
 function downloadJson() {
   const blob = new Blob([json.value], { type: 'application/json;charset=utf-8' })
-  const { download } = useDownload(blob, 'humanning-message-context.json')
+  const { download } = useDownload(blob, `humanning-message-${view.value}.json`)
   download()
 }
 </script>
@@ -105,7 +121,7 @@ function downloadJson() {
           </DialogClose>
         </div>
         <DialogDescription :class="['text-sm text-neutral-600 dark:text-neutral-300']">
-          {{ t('stage.chat.context.description') }}
+          {{ t(`stage.chat.context.${view}-description`) }}
         </DialogDescription>
         <p v-if="loading" role="status" :class="['py-6 text-sm']">
           {{ t('stage.chat.context.loading') }}
@@ -121,6 +137,24 @@ function downloadJson() {
           {{ t(unavailableKey) }}
         </p>
         <template v-else-if="result?.status === 'found'">
+          <div role="group" :aria-label="t('stage.chat.context.view')" :class="['flex flex-wrap gap-2']">
+            <Button
+              size="sm"
+              :variant="view === 'messages' ? 'primary' : 'secondary'"
+              :aria-pressed="view === 'messages'"
+              @click="view = 'messages'"
+            >
+              {{ t('stage.chat.context.messages') }}
+            </Button>
+            <Button
+              size="sm"
+              :variant="view === 'record' ? 'primary' : 'secondary'"
+              :aria-pressed="view === 'record'"
+              @click="view = 'record'"
+            >
+              {{ t('stage.chat.context.record') }}
+            </Button>
+          </div>
           <p v-if="result.match === 'content'" role="status" :class="['text-xs text-neutral-600 dark:text-neutral-300']">
             {{ t('stage.chat.context.content-match') }}
           </p>
@@ -131,16 +165,16 @@ function downloadJson() {
           >
             <pre
               tabindex="0"
-              :aria-label="t('stage.chat.context.json')"
+              :aria-label="jsonLabel"
               :class="['m-0 w-max min-w-full select-text text-xs font-mono leading-relaxed outline-none', 'focus-visible:ring-2 focus-visible:ring-primary-400']"
             >{{ json }}</pre>
           </ScrollableArea>
           <div :class="['flex flex-wrap gap-2']">
             <Button size="sm" icon="i-solar:copy-linear" @click="copyJson">
-              {{ t(copied ? 'stage.chat.context.copied' : 'stage.chat.context.copy') }}
+              {{ t(copied ? 'stage.chat.context.copied' : `stage.chat.context.copy-${view}`) }}
             </Button>
             <Button size="sm" icon="i-solar:download-linear" @click="downloadJson">
-              {{ t('stage.chat.context.download') }}
+              {{ t(`stage.chat.context.download-${view}`) }}
             </Button>
           </div>
           <p v-if="copyError" role="alert" :class="['text-sm text-red-600 dark:text-red-300']">

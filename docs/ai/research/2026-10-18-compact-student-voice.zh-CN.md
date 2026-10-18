@@ -42,6 +42,10 @@ CPU 辅助模型仍占内存，不能把低显存等同于零内存成本。
 
 ## 声线与接口
 
+下表记录首轮验收的固定参考。
+后续已增加五种可选声音，默认改为 `anime-playful`。
+选择方法和可编辑配置见[本地声音配置](../local-voice-profiles.zh-CN.md)。
+
 | 设置 | 值 |
 | --- | --- |
 | Provider | `openai-compatible-audio-speech` |
@@ -178,14 +182,14 @@ ASR 回读只能检查可懂度，不能证明音色偏好和情绪自然度。
 准备脚本固定官方源码提交与下载版本。
 它按发布者 SHA-256 或 Git blob SHA-1 检查每个文件。
 校验结果保存在运行时根目录 `publisher-manifest.json`。
-服务启动预检 18 个文件，并检查本地源码补丁的 SHA-256。
+服务启动预检 17 个运行时文件和全部配置参考，并检查本地源码补丁的 SHA-256。
 
 Windows 缺少 C++ 编译器，不能安装该版本的 `jieba_fast`。
 准备脚本只把三个中文前端文件的导入切换为同接口的 `jieba`。
 官方项目同时声明了这两个依赖。
 脚本记录补丁路径和哈希，遇到其他源码改动会停止。
 
-服务用 SoundFile 读取固定 PCM WAV 参考，避免要求额外 TorchCodec、FFmpeg 解码链。
+服务用 SoundFile 读取配置中的 PCM WAV 参考，避免要求额外 TorchCodec、FFmpeg 解码链。
 原因与 [TorchAudio 2.9 的读取接口变化](https://docs.pytorch.org/audio/2.9.0/generated/torchaudio.load.html)一致。
 没有修改已安装的 torchaudio 或替换其全局函数。
 
@@ -196,8 +200,8 @@ Windows 缺少 C++ 编译器，不能安装该版本的 `jieba_fast`。
 
 ## 已运行检查
 
-- `python scripts/test-local-gpt-sovits.py`：5 项真实 HTTP 边界测试通过。
-- `serve-local-gpt-sovits.py --check`：18 个文件预检通过。
+- `python scripts/test-local-gpt-sovits.py`：11 项协议与参考配置测试通过。
+- `serve-local-gpt-sovits.py --check`：17 个运行时文件和五种参考预检通过。
 - 四个 Python 入口的 `py_compile` 通过。
 - `stage-ui` 的 `local-stream.test.ts`：7 项通过，包含 32kHz 单声道、整句分段和无标点超长内容回归。
 - 三个修改的 TypeScript 文件 ESLint：0 错误，`speech.ts` 原有两项长注释警告。

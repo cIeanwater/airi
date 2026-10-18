@@ -47,7 +47,7 @@ Humanning 是基于 [moeru-ai/AIRI](https://github.com/moeru-ai/airi) 的本地�
 
 | 方向 | 实现边界 | 证据 |
 | --- | --- | --- |
-| INT4 本地模型 | 官方 QAT Q4_0 权重，固定哈希，16K Q8 KV 缓存 | [运行说明](local-gemma4-int4.zh-CN.md) |
+| INT4 本地模型 | 官方 QAT Q4_0 权重，固定哈希，64K Q8 KV 缓存 | [运行说明](local-gemma4-int4.zh-CN.md) |
 | 检索式长期记忆 | 本地 MiniSearch，用户和角色隔离，原文证据与来源 | [模块与评测](../../packages/memory-local/benchmarks/README.md) |
 | 持久化回执 | 助手保存完成后才报告成功，导出等待保存队列 | [持久化 ADR](adr/2026-10-16-local-chat-persistence.zh-CN.md) |
 | 离线 VAD | 模型与匹配运行库随应用打包，冷缓存时不依赖外网 | [离线验收](validation/2026-10-17-offline-voice-detection.zh-CN.md) |

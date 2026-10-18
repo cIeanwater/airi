@@ -1,10 +1,12 @@
 """Serve a compact GPT-SoVITS voice with CPU features and FP16 CUDA synthesis."""
 
 import argparse
+import copy
 import hashlib
 import io
 import json
 import os
+import re
 import select
 import socket
 import sys
@@ -21,7 +23,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_ID = "gpt-sovits-v2proplus"
 VOICE_ID = "student-bright"
-REFERENCE_TEXT = "诶，真的吗？这个想法好有意思！你是怎么想到的呀？"
+DEFAULT_PROFILES = ROOT / "configs/local-voice-profiles.json"
 SOURCE_REVISION = "1b47ca07ef43a284e0b8bd7f29d3e1e3ff76082a"
 
 
@@ -42,11 +44,61 @@ def allows_origin(origin):
             and not parsed.query and not parsed.fragment and not any(c.isspace() for c in origin))
 
 
-def parse_request(body):
+def load_voice_profiles(path):
+    """Read startup-only references. HTTP callers can select IDs, never local paths."""
+    path = path.expanduser().resolve()
+    if path.stat().st_size > 65536:
+        raise ValueError("The voice profiles file exceeds 65536 bytes")
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    if not isinstance(data, dict) or set(data) != {"version", "default_voice", "voices"} or data["version"] != 1:
+        raise ValueError("Use voice profiles version=1 with default_voice and voices")
+    entries = data["voices"]
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 12:
+        raise ValueError("Provide 1 to 12 voice profiles")
+    voices = {}
+    for entry in entries:
+        fields = {"id", "name", "description", "reference_audio", "reference_text", "speed_factor"}
+        if not isinstance(entry, dict) or set(entry) != fields:
+            raise ValueError("Each profile requires id, name, description, reference_audio, reference_text, and speed_factor")
+        voice_id = entry["id"]
+        if not isinstance(voice_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", voice_id) or voice_id in voices:
+            raise ValueError("Voice IDs must be unique lowercase names with at most 48 characters")
+        for field, maximum in (("name", 80), ("description", 240), ("reference_text", 240), ("reference_audio", 2048)):
+            value = entry[field]
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum or any(ord(c) < 32 for c in value):
+                raise ValueError(f"Invalid voice profile field: {field}")
+        if "<|" in entry["reference_text"] or "|>" in entry["reference_text"]:
+            raise ValueError("Reference text cannot contain model control tokens")
+        speed = entry["speed_factor"]
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not 0.8 <= speed <= 1.2:
+            raise ValueError("speed_factor must be between 0.8 and 1.2")
+        reference = (path.parent / entry["reference_audio"]).resolve()
+        with wave.open(str(reference), "rb") as audio:
+            seconds = audio.getnframes() / audio.getframerate()
+            if (audio.getcomptype() != "NONE" or audio.getsampwidth() != 2 or audio.getnchannels() not in {1, 2}
+                    or not 16000 <= audio.getframerate() <= 48000 or not 3 <= seconds <= 10):
+                raise ValueError("Each reference must be a 3 to 10 second PCM16 WAV at 16 to 48 kHz")
+        voices[voice_id] = {**entry, "reference_audio": reference, "reference_seconds": seconds,
+                            "reference_sha256": hashlib.sha256(reference.read_bytes()).hexdigest()}
+    if not isinstance(data["default_voice"], str) or data["default_voice"] not in voices:
+        raise ValueError("default_voice must name a configured voice")
+    return {"default_voice": data["default_voice"], "voices": voices,
+            "config_sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def voice_catalog(profiles):
+    return [{"id": voice["id"], "name": voice["name"], "description": voice["description"],
+             "language": "Chinese", "gender": "female", "speed_factor": voice["speed_factor"]}
+            for voice in profiles["voices"].values()]
+
+
+def parse_request(body, profiles):
     if not isinstance(body, dict):
         raise ValueError("Expected a JSON object")
-    if body.get("model") != MODEL_ID or body.get("voice", VOICE_ID) != VOICE_ID:
-        raise ValueError(f"Use model={MODEL_ID} and voice={VOICE_ID}")
+    voice_id = body.get("voice", profiles["default_voice"])
+    if body.get("model") != MODEL_ID or not isinstance(voice_id, str) or voice_id not in profiles["voices"]:
+        raise ValueError(f"Use model={MODEL_ID} and a configured voice ID from /v1/audio/voices")
     text = body.get("input")
     if not isinstance(text, str) or not text.strip() or len(text) > 240:
         raise ValueError("input must contain 1 to 240 characters")
@@ -60,15 +112,15 @@ def parse_request(body):
         raise ValueError("Use WAV for complete audio, or stream=true with response_format=pcm")
     if body.get("instructions") or body.get("speed", 1) != 1:
         raise ValueError("This voice uses its reference prosody. Instructions and speed changes are unsupported")
-    return {"text": text.strip(), "stream": stream, "format": output_format}
+    return {"text": text.strip(), "voice": voice_id, "stream": stream, "format": output_format}
 
 
-def check_files(runtime_dir, reference):
+def check_files(runtime_dir, profiles):
     models = runtime_dir / "GPT_SoVITS/pretrained_models"
     required = [runtime_dir / "GPT_SoVITS/TTS_infer_pack/TTS.py", models / "s1v3.ckpt",
                 models / "v2Pro/s2Gv2ProPlus.pth", models / "sv/pretrained_eres2netv2w24s4ep4.ckpt",
                 models / "chinese-roberta-wwm-ext-large/pytorch_model.bin",
-                models / "chinese-hubert-base/pytorch_model.bin", reference,
+                models / "chinese-hubert-base/pytorch_model.bin",
                 models / "chinese-roberta-wwm-ext-large/config.json", models / "chinese-roberta-wwm-ext-large/tokenizer.json",
                 models / "chinese-hubert-base/config.json", models / "chinese-hubert-base/preprocessor_config.json",
                 models / "fast_langdetect/lid.176.bin"]
@@ -84,18 +136,16 @@ def check_files(runtime_dir, reference):
     for patch in manifest["source_patches"]:
         if hashlib.sha256((runtime_dir / patch["path"]).read_bytes()).hexdigest() != patch["sha256"]:
             raise ValueError("A prepared runtime source file changed: " + patch["path"])
-    with wave.open(str(reference), "rb") as audio:
-        seconds = audio.getnframes() / audio.getframerate()
-    if not 3 <= seconds <= 10:
-        raise ValueError("The voice reference must contain 3 to 10 seconds of original synthetic speech")
     return {"model": MODEL_ID, "source_revision": SOURCE_REVISION, "required_files": len(required),
-            "reference_sha256": hashlib.sha256(reference.read_bytes()).hexdigest(), "reference_seconds": seconds}
+            "default_voice": profiles["default_voice"],
+            "voices": [{"id": voice["id"], "reference_sha256": voice["reference_sha256"],
+                        "reference_seconds": voice["reference_seconds"]} for voice in profiles["voices"].values()]}
 
 
 class SpeechRuntime:
-    """One voice owns its reference cache, CUDA models, and per-request cancellation hook."""
+    """One model owns startup references and serialized, cancelable synthesis."""
 
-    def __init__(self, runtime_dir, reference, threads):
+    def __init__(self, runtime_dir, profiles, threads):
         started = time.perf_counter()
         os.chdir(runtime_dir)
         sys.path[:0] = [str(runtime_dir), str(runtime_dir / "GPT_SoVITS")]
@@ -173,16 +223,35 @@ class SpeechRuntime:
                              "cnhuhbert_base_path": str(models / "chinese-hubert-base")}}
         self.model = CpuFeaturesTTS(config)
         self.model.text_preprocessor.device = torch.device("cpu")
-        self.reference = str(reference)
-        self.model.set_ref_audio(self.reference)
-        phones, features, normalized = self.model.text_preprocessor.segment_and_extract_feature_for_text(REFERENCE_TEXT, "all_zh", "v2ProPlus")
-        self.model.prompt_cache.update({"prompt_text": REFERENCE_TEXT, "prompt_lang": "all_zh", "phones": phones,
-                                       "bert_features": features, "norm_text": normalized})
-        samples, rate = sf.read(reference, dtype="float32", always_2d=True)
-        samples = librosa.resample(samples.mean(axis=1), orig_sr=rate, target_sr=16000)
-        with torch.inference_mode():
-            speaker = self.model.sv_model.compute_embedding3(torch.from_numpy(samples).unsqueeze(0)).to("cuda", dtype=torch.float16)
-        self.model.sv_model.compute_embedding3 = lambda _audio: speaker
+        self.profiles = profiles
+        self.reference_caches, self.speakers = {}, {}
+
+        def cpu_cache(value):
+            if isinstance(value, torch.Tensor):
+                return value.detach().cpu()
+            if isinstance(value, dict):
+                return {key: cpu_cache(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [cpu_cache(item) for item in value]
+            if isinstance(value, tuple):
+                return tuple(cpu_cache(item) for item in value)
+            return value
+
+        # Reference tensors stay on CPU. Switching voices reuses the same two CUDA synthesis models.
+        for voice_id, profile in profiles["voices"].items():
+            reference, text = profile["reference_audio"], profile["reference_text"]
+            self.model.set_ref_audio(str(reference))
+            phones, features, normalized = self.model.text_preprocessor.segment_and_extract_feature_for_text(text, "all_zh", "v2ProPlus")
+            self.model.prompt_cache.update({"prompt_text": text, "prompt_lang": "all_zh", "phones": phones,
+                                           "bert_features": features, "norm_text": normalized})
+            self.reference_caches[voice_id] = cpu_cache(self.model.prompt_cache)
+            samples, rate = sf.read(reference, dtype="float32", always_2d=True)
+            samples = librosa.resample(samples.mean(axis=1), orig_sr=rate, target_sr=16000)
+            with torch.inference_mode():
+                self.speakers[voice_id] = self.model.sv_model.compute_embedding3(torch.from_numpy(samples).unsqueeze(0)).half().cpu()
+        self.active_voice = None
+        self.active_speaker = None
+        self.model.sv_model.compute_embedding3 = lambda _audio: self.active_speaker
         # A public PyTorch forward hook checks disconnects for every generated token.
         # BaseException exits the upstream generator without its costly model reload path.
         self.model.t2s_model.model.ar_predict_layer.register_forward_pre_hook(lambda _module, _args: self.check_cancelled())
@@ -191,13 +260,16 @@ class SpeechRuntime:
         self.channels = 1
         self.threads = threads
         # Warm public synthetic speech before readiness so the first conversation avoids CUDA kernel initialization gaps.
-        self.warmup_result = self.synthesize({"text": "放学啦，今天有什么有趣的事情想和我说吗？"}, lambda _pcm: None, lambda: None)
+        self.warmup_result = self.synthesize({"text": "放学啦，今天有什么有趣的事情想和我说吗？", "voice": profiles["default_voice"]},
+                                             lambda _pcm: None, lambda: None)
         self.load_seconds = time.perf_counter() - started
 
     def describe(self):
         torch = self.torch
         return {"pid": os.getpid(), "device": "cuda", "dtype": "float16", "feature_device": "cpu",
-                "voice": VOICE_ID, "sample_rate": self.sample_rate, "channels": self.channels,
+                "voice": self.profiles["default_voice"], "voice_ids": list(self.profiles["voices"]),
+                "voice_profiles_sha256": self.profiles["config_sha256"],
+                "active_voice": self.active_voice, "sample_rate": self.sample_rate, "channels": self.channels,
                 "threads": self.threads, "streaming": True, "instruction_control": False,
                 "warmup": self.warmup_result,
                 "load_seconds": round(self.load_seconds, 3),
@@ -209,10 +281,17 @@ class SpeechRuntime:
     def synthesize(self, request, emit, check_cancelled):
         started = time.perf_counter()
         self.check_cancelled = check_cancelled
+        voice_id = request["voice"]
+        profile = self.profiles["voices"][voice_id]
+        if voice_id != self.active_voice:
+            self.model.prompt_cache = copy.deepcopy(self.reference_caches[voice_id])
+            self.active_speaker = self.speakers[voice_id].to("cuda")
+            self.active_voice = voice_id
         chunks, frames, first_pcm = 0, 0, None
-        inputs = {"text": request["text"], "text_lang": "all_zh", "ref_audio_path": self.reference,
-                  "prompt_text": REFERENCE_TEXT, "prompt_lang": "all_zh", "text_split_method": "cut0",
+        inputs = {"text": request["text"], "text_lang": "all_zh", "ref_audio_path": str(profile["reference_audio"]),
+                  "prompt_text": profile["reference_text"], "prompt_lang": "all_zh", "text_split_method": "cut0",
                   "top_k": 15, "top_p": 1.0, "temperature": 0.8, "repetition_penalty": 1.35,
+                  "speed_factor": profile["speed_factor"],
                   "batch_size": 1, "split_bucket": False, "parallel_infer": False,
                   "streaming_mode": True, "min_chunk_length": 24, "fixed_length_chunk": False,
                   "overlap_length": 4, "fragment_interval": 0.0, "seed": 20261018}
@@ -238,7 +317,7 @@ class SpeechRuntime:
             self.check_cancelled = lambda: None
         seconds = frames / self.sample_rate
         elapsed = time.perf_counter() - started
-        return {"first_pcm_seconds": round(first_pcm, 4), "generation_seconds": round(elapsed, 4),
+        return {"voice": voice_id, "first_pcm_seconds": round(first_pcm, 4), "generation_seconds": round(elapsed, 4),
                 "audio_seconds": round(seconds, 4), "real_time_factor": round(elapsed / seconds, 4), "chunks": chunks,
                 "cuda_peak_reserved_mib": round(self.torch.cuda.max_memory_reserved() / 1048576, 2)}
 
@@ -300,7 +379,8 @@ class SpeechHandler(BaseHTTPRequestHandler):
         elif path == "/v1/models":
             self.json(200, {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "local"}]})
         elif path == "/v1/audio/voices":
-            self.json(200, {"voices": [{"id": VOICE_ID, "name": "Student Bright", "language": "Chinese"}]})
+            self.json(200, {"model": MODEL_ID, "default_voice": self.server.runtime.profiles["default_voice"],
+                            "voices": voice_catalog(self.server.runtime.profiles)})
         else:
             self.json(404, {"error": {"message": "Unknown endpoint"}})
 
@@ -323,7 +403,7 @@ class SpeechHandler(BaseHTTPRequestHandler):
             if not 0 < length <= 16384:
                 raise ValueError("JSON body must contain 1 to 16384 bytes")
             self.connection.settimeout(8)
-            request = parse_request(json.loads(self.rfile.read(length)))
+            request = parse_request(json.loads(self.rfile.read(length)), self.server.runtime.profiles)
         except (ValueError, TypeError) as error:
             self.json(400, {"error": {"message": str(error)}})
             return
@@ -388,19 +468,21 @@ class SpeechHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-dir", type=Path, default=ROOT.parent / ".tools/gpt-sovits-v2proplus")
-    parser.add_argument("--reference", type=Path, default=ROOT.parent / ".tools/modern-voice-2026-10-17/vivian-curious.wav")
+    parser.add_argument("--voice-profiles", type=Path, default=DEFAULT_PROFILES,
+                        help="Read local voice IDs, reference WAV paths, exact text, and speed at startup")
     parser.add_argument("--port", type=int, default=18089)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or not 1 <= args.threads <= 16:
         parser.error("Use port 1 to 65535 and threads 1 to 16")
-    runtime_dir, reference = args.runtime_dir.resolve(), args.reference.resolve()
-    checked = check_files(runtime_dir, reference)
+    runtime_dir = args.runtime_dir.resolve()
+    profiles = load_voice_profiles(args.voice_profiles)
+    checked = check_files(runtime_dir, profiles)
     if args.check:
         print(json.dumps({"verified": True, **checked}), flush=True)
         return 0
-    runtime = SpeechRuntime(runtime_dir, reference, args.threads)
+    runtime = SpeechRuntime(runtime_dir, profiles, args.threads)
     server = SpeechServer(("127.0.0.1", args.port), runtime)
     print(json.dumps({"listening": f"http://127.0.0.1:{args.port}", "model": MODEL_ID, **runtime.describe()}), flush=True)
     server.serve_forever()

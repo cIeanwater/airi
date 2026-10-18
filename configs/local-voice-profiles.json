@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "default_voice": "anime-playful",
+  "voices": [
+    {
+      "id": "anime-playful",
+      "name": "动漫 · 轻快俏皮",
+      "description": "Vivian 原始合成参考升调 4 半音，语速 1.10 倍。属于可试听的参考变体。",
+      "reference_audio": "../../.tools/local-voice-references/anime-playful.wav",
+      "reference_text": "诶，真的吗？这个想法好有意思！你是怎么想到的呀？",
+      "speed_factor": 1.1
+    },
+    {
+      "id": "anime-soft",
+      "name": "动漫 · 轻柔明亮",
+      "description": "Serena 原始合成参考升调 3 半音，语速 1.04 倍。属于可试听的参考变体。",
+      "reference_audio": "../../.tools/local-voice-references/anime-soft.wav",
+      "reference_text": "你回来啦！今天过得怎么样？要不要先坐下来，和我聊一会儿？",
+      "speed_factor": 1.04
+    },
+    {
+      "id": "student-bright",
+      "name": "Vivian · 好奇轻快",
+      "description": "原始合成参考，语气好奇。声线取决于参考音频，可以更换。",
+      "reference_audio": "../../.tools/modern-voice-2026-10-17/vivian-curious.wav",
+      "reference_text": "诶，真的吗？这个想法好有意思！你是怎么想到的呀？",
+      "speed_factor": 1.0
+    },
+    {
+      "id": "serena-friendly",
+      "name": "Serena · 明快亲切",
+      "description": "另一种原始合成声线，语速略快。试听后选择符合人设的声音。",
+      "reference_audio": "../../.tools/modern-voice-2026-10-17/serena-friendly.wav",
+      "reference_text": "你回来啦！今天过得怎么样？要不要先坐下来，和我聊一会儿？",
+      "speed_factor": 1.06
+    },
+    {
+      "id": "serena-gentle",
+      "name": "Serena · 轻柔陪伴",
+      "description": "轻柔、平缓的原始合成参考，适合安静聊天。",
+      "reference_audio": "../../.tools/modern-voice-2026-10-17/serena-gentle.wav",
+      "reference_text": "嗯，我在听。今天很辛苦吧？先别着急，我们慢慢说。",
+      "speed_factor": 1.0
+    }
+  ]
+}

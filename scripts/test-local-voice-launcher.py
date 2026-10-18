@@ -1,5 +1,6 @@
 """Check Windows desktop startup without models, Electron, or a terminal PATH."""
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -190,8 +191,9 @@ process.stdout.write(JSON.stringify({
             if len(processes) <= list(models).index(port):
                 return None
             if port == 18088:
-                return {"data": [{"id": models[port]}]} if path == "/v1/models" else {"status": "ok"}
-            return {"status": "ready", "model": models[port], "message_recording": {"enabled": True}}
+                return {"data": [{"id": models[port], "meta": {"n_ctx": 65536}}]} if path == "/v1/models" else {"status": "ok"}
+            return {"status": "ready", "model": models[port], "message_recording": {"enabled": True},
+                    "voice_profiles_sha256": hashlib.sha256((ROOT / "configs/local-voice-profiles.json").read_bytes()).hexdigest()}
 
         def run_process(command, **kwargs):
             process = SimpleNamespace(args=command, pid=100 + len(processes), poll=lambda: None, kwargs=kwargs)
@@ -204,7 +206,8 @@ process.stdout.write(JSON.stringify({
         logs = self.root / "student service logs"
         logs.mkdir()
         arguments = SimpleNamespace(services_only=True, no_message_recording=False,
-                                    llm="gemma", tts="gpt-sovits", context_size=16384)
+                                    llm="gemma", tts="gpt-sovits", context_size=65536,
+                                    voice_profiles=ROOT / "configs/local-voice-profiles.json")
         with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
             with patch.object(LAUNCHER, "port_is_free", return_value=True):
                 with patch.object(LAUNCHER.subprocess, "Popen", side_effect=run_process):
@@ -216,15 +219,15 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(len(processes), 5)
         engine = processes[2].args
         self.assertEqual(engine[0], str(models_root / "runtime/llama.cpp-b11146-vulkan/llama-server.exe"))
-        self.assertEqual(engine[engine.index("--ctx-size") + 1], "16384")
+        self.assertEqual(engine[engine.index("--ctx-size") + 1], "65536")
         self.assertEqual(engine[engine.index("--gpu-layers") + 1], "all")
         gateway = processes[3].args
         self.assertIn("--warmup", gateway)
         self.assertEqual(gateway[gateway.index("--upstream") + 1], "http://127.0.0.1:18088")
         self.assertEqual(gateway[gateway.index("--record-messages-dir") + 1], str(self.tools / "airi-message-records"))
         self.assertEqual(processes[4].args, [str(tts_python), "-u", str(ROOT / "scripts/serve-local-gpt-sovits.py"),
-                                           "--runtime-dir", str(tts_root), "--reference",
-                                           str(self.tools / "modern-voice-2026-10-17/vivian-curious.wav"),
+                                           "--runtime-dir", str(tts_root), "--voice-profiles",
+                                           str(ROOT / "configs/local-voice-profiles.json"),
                                            "--port", "18084", "--threads", "4"])
         self.assertTrue(all(process.kwargs["env"]["HF_HUB_OFFLINE"] == "1" for process in processes))
 
@@ -236,7 +239,8 @@ process.stdout.write(JSON.stringify({
             return {"status": "ready", "model": models[port], "message_recording": {"enabled": True}}
 
         arguments = SimpleNamespace(services_only=True, no_message_recording=False,
-                                    llm="qwen", tts="gpt-sovits", context_size=16384)
+                                    llm="qwen", tts="gpt-sovits", context_size=65536,
+                                    voice_profiles=ROOT / "configs/local-voice-profiles.json")
         with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
             with patch.object(LAUNCHER, "port_is_free", return_value=False):
                 with patch.object(LAUNCHER.subprocess, "Popen") as process:
@@ -245,6 +249,42 @@ process.stdout.write(JSON.stringify({
                                                 self.root / "llm.exe", self.root / "asr.exe", self.root / "turn.exe",
                                                 self.root / "tts.exe", self.root, self.root, self.root,
                                                 self.desktop, None, None)
+        process.assert_not_called()
+
+    def test_existing_smaller_context_is_not_reported_ready_for_64k(self):
+        def health(port, path="/health", _token=None):
+            if port == 18088:
+                return {"data": [{"id": "gemma4-e2b-int4", "meta": {"n_ctx": 16384}}]} if path == "/v1/models" else {"status": "ok"}
+            return {"status": "ready", "model": {18086: "zipformer-small-zh-en-int8", 18085: "smart-turn-v3.2-cpu"}[port]}
+
+        arguments = SimpleNamespace(services_only=True, no_message_recording=False,
+                                    llm="gemma", tts="moss", context_size=65536)
+        with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
+            with patch.object(LAUNCHER, "port_is_free", return_value=False), patch.object(LAUNCHER.subprocess, "Popen") as process:
+                with self.assertRaisesRegex(RuntimeError, "18088.*llm-engine health check"):
+                    LAUNCHER.start_services(arguments, self.tools, self.root, self.root,
+                                            self.root / "llm.exe", self.root / "asr.exe", self.root / "turn.exe",
+                                            self.root / "tts.exe", self.root, self.root, self.root,
+                                            self.desktop, None, None)
+        process.assert_not_called()
+
+    def test_changed_voice_profiles_do_not_silently_reuse_old_service(self):
+        models = {18086: "zipformer-small-zh-en-int8", 18085: "smart-turn-v3.2-cpu",
+                  18083: "qwen3.5-2b-bf16", 18084: "gpt-sovits-v2proplus"}
+
+        def health(port, _path="/health", _token=None):
+            return {"status": "ready", "model": models[port], "message_recording": {"enabled": True},
+                    "voice_profiles_sha256": "an-outdated-config"}
+
+        arguments = SimpleNamespace(services_only=True, no_message_recording=False, llm="qwen", tts="gpt-sovits",
+                                    context_size=65536, voice_profiles=ROOT / "configs/local-voice-profiles.json")
+        with redirect_stdout(io.StringIO()), patch.object(LAUNCHER, "get_health", side_effect=health):
+            with patch.object(LAUNCHER.subprocess, "Popen") as process:
+                with self.assertRaisesRegex(RuntimeError, "Voice profiles changed.*Restart"):
+                    LAUNCHER.start_services(arguments, self.tools, self.root, self.root,
+                                            self.root / "llm.exe", self.root / "asr.exe", self.root / "turn.exe",
+                                            self.root / "tts.exe", self.root, self.root, self.root,
+                                            self.desktop, None, None)
         process.assert_not_called()
 
 
@@ -260,6 +300,9 @@ class LauncherPreflightTests(unittest.TestCase):
         self.models = self.root / "models with spaces"
         self.entry = self.root / "scripts/start-local-voice.py"
         write_file(self.entry, (ROOT / "scripts/start-local-voice.py").read_text(encoding="utf-8"))
+        write_file(self.root / "configs/local-voice-profiles.json", json.dumps({"voices": [
+            {"reference_audio": str(self.tools / "modern-voice-2026-10-17/vivian-curious.wav")},
+        ]}))
         files = [
             self.models / "airllm-cuda-venv/Scripts/python.exe",
             self.models / "qwen3.5-2b-bf16/config.json",
@@ -349,7 +392,7 @@ class LauncherPreflightTests(unittest.TestCase):
         output = json.loads(result.stdout)
         self.assertEqual(output["llm"], "gemma")
         self.assertEqual(output["tts"], "gpt-sovits")
-        self.assertEqual(output["context_size"], 16384)
+        self.assertEqual(output["context_size"], 65536)
 
     def test_explicit_moss_does_not_require_student_voice_files(self):
         shutil.rmtree(self.tools / "gpt-sovits-v2proplus")
@@ -366,6 +409,25 @@ class LauncherPreflightTests(unittest.TestCase):
         result = self.run_entry("--services-only", "--check")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(json.loads(result.stdout)["missing_files"], [str(reference)])
+        self.assertFalse((self.tools / "local-voice-logs").exists())
+
+    def test_custom_voice_paths_are_checked_relative_to_the_config(self):
+        config = self.root / "custom profiles/voices.json"
+        reference = config.parent / "own reference.wav"
+        write_file(config, json.dumps({"voices": [{"reference_audio": "own reference.wav"}]}))
+        result = self.run_entry("--services-only", "--check", "--voice-profiles", str(config))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["missing_files"], [str(reference)])
+        write_file(reference, "prepared path fixture")
+        result = self.run_entry("--services-only", "--check", "--voice-profiles", str(config), "--context-size", "131072")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout)["context_size"], 131072)
+
+    def test_invalid_voice_config_fails_before_any_service_starts(self):
+        write_file(self.root / "configs/local-voice-profiles.json", json.dumps({"voices": [{}]}))
+        result = self.run_entry("--services-only", "--check")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("reference_audio", json.loads(result.stdout)["error"])
         self.assertFalse((self.tools / "local-voice-logs").exists())
 
     def run_batch(self, *arguments):

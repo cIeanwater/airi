@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createLocalMessageContextHeaders, fetchLocalMessageContext, resolveMessageContextTarget } from './local-message-context'
+import { createLocalMessageContextHeaders, fetchLocalMessageContext, projectMessageContext, resolveMessageContextTarget } from './local-message-context'
 
 const server = createServer()
 afterEach(async () => {
@@ -62,5 +62,54 @@ describe('local message context correlation', () => {
   it('refuses remote endpoints before sending any message text', async () => {
     expect(await fetchLocalMessageContext(request('https://remote.example/v1/'), { content: 'private answer' })).toEqual({ status: 'unavailable', reason: 'unsupported-provider' })
     expect(await fetchLocalMessageContext(request('http://user:secret@localhost:18083/v1/'), { content: 'private answer' })).toEqual({ status: 'unavailable', reason: 'unsupported-provider' })
+  })
+})
+
+describe('saved model message projection', () => {
+  it('preserves actual forwarded messages, tool calls, multimodal content, and each tool round without stream metadata', () => {
+    const question = { role: 'user', content: [{ type: 'text', text: 'Look at this' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,synthetic' } }] }
+    const call = { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_note', arguments: '{"key":"tea"}' } }] }
+    const tool = { role: 'tool', tool_call_id: 'call-1', content: '{"preference":"tea"}' }
+    const answer = { role: 'assistant', content: 'Here is your tea.', reasoning_content: 'Saved reasoning' }
+    const firstRound = {
+      request: { messages: [{ role: 'user', content: 'Original question before projection' }] },
+      model_input: { messages: [question] },
+      response: { choices: [{ message: call }], usage: { total_tokens: 100 } },
+      stream_events: [{ object: 'chat.completion.chunk', choices: [{ delta: { content: 'noise' } }] }],
+    }
+    const secondRound = {
+      model_input: { messages: [question, call, tool] },
+      response: { choices: [{ message: answer }] },
+    }
+    const records = [firstRound, secondRound]
+    const original = JSON.stringify(records)
+    expect(projectMessageContext(records)).toEqual([
+      { messages: [question], response: call },
+      { messages: [question, call, tool], response: answer },
+    ])
+    expect(JSON.stringify(records)).toBe(original)
+  })
+
+  it('uses the original request only when actual messages are unrecorded, including empty actual input', () => {
+    const messages = [{ role: 'system', content: 'Recorded original prompt' }]
+    expect(projectMessageContext([
+      { request: { messages }, model_input: { rendered_prompt: 'Original template' } },
+      { request: { messages }, model_input: { messages: [] } },
+    ])).toEqual([
+      { messages, response: null },
+      { messages: [], response: null },
+    ])
+  })
+
+  it('keeps missing or malformed exchanges null instead of inventing messages from raw text or stream deltas', () => {
+    expect(projectMessageContext([
+      { request: { messages: 'bad' }, model_input: null, model_output_raw_text: 'Do not use this as the response' },
+      { stream_events: [{ choices: [{ delta: { role: 'assistant', content: 'Partial only' } }] }], response: { error: { message: 'Canceled' } } },
+      { response: { choices: [] } },
+    ])).toEqual([
+      { messages: null, response: null },
+      { messages: null, response: null },
+      { messages: null, response: null },
+    ])
   })
 })

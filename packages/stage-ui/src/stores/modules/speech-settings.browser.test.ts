@@ -16,6 +16,7 @@ import { injectKeyPiniaSynced } from '../../libs/pinia/synced-context'
 import { captureAnalyticsEvent, enableAnalyticsCapture, isAnalyticsAvailableInBuild } from '../../libs/product-signals/client'
 import { useProviderConfigStore } from '../providers/config'
 import { useProviderStore } from '../providers/provider'
+import { useAiriCardStore } from './airi-card'
 import { useSpeechStore } from './speech'
 
 // Analytics delivery is external IO. Exercise the real page and stores while
@@ -25,7 +26,7 @@ vi.mock('../../libs/product-signals/client', { spy: true })
 const cleanups: Array<() => void> = []
 
 /** Mounts a real renderer with a separate Pinia and BroadcastChannel runtime. */
-function mountRenderer(namespace: string, page?: Component) {
+function mountRenderer(namespace: string, page?: Component, withCards = false) {
   const pinia = createPinia()
   const runtime = createSyncedPiniaPlugin({ namespace, leadership: page ? 'follower-only' : 'leader-only' })
   pinia.use(runtime.plugin)
@@ -34,6 +35,8 @@ function mountRenderer(namespace: string, page?: Component) {
   const app = createApp({
     setup() {
       useSpeechStore()
+      if (withCards)
+        useAiriCardStore()
       return () => page ? h(page) : null
     },
   })
@@ -170,4 +173,42 @@ it('shows a manual model transport failure in the settings page', async () => {
   expect(globalErrors).not.toHaveBeenCalled()
   expect(follower.container.textContent).toContain('Model selection transport unavailable')
   expect(leader.speech.activeSpeechModel).toBe('tts-1')
+})
+
+it('shows local voice profiles, preserves the card selection, and commits a new voice across renderers', async () => {
+  localStorage.clear()
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
+    if (String(input).endsWith('/audio/voices')) {
+      return Response.json({ model: 'gpt-sovits-v2proplus', voices: [
+        { id: 'anime-playful', name: '动漫 · 轻快俏皮', description: 'Bright synthetic reference', gender: 'female' },
+        { id: 'anime-soft', name: '动漫 · 轻柔明亮', description: 'Soft synthetic reference', gender: 'female' },
+      ] })
+    }
+    return Response.json({ data: [], voices: [] })
+  }))
+  const namespace = `speech-settings:${crypto.randomUUID()}`
+  const leader = mountRenderer(namespace, undefined, true)
+  await vi.waitFor(() => expect(leader.runtime.isLeader()).toBe(true))
+  const provider = 'openai-compatible-audio-speech'
+  await useProviderConfigStore(leader.pinia).ensureProvider(provider, provider, {
+    apiKey: 'local',
+    baseUrl: 'http://127.0.0.1:18084/v1/',
+    model: 'gpt-sovits-v2proplus',
+    voice: 'student-bright',
+  })
+  await useProviderStore(leader.pinia).forceProviderConfigured(provider)
+  const cards = useAiriCardStore(leader.pinia)
+  await cards.initialize()
+  await cards.updateActiveCardSpeech({ provider, model: 'gpt-sovits-v2proplus', voice_id: 'anime-playful' })
+  const follower = mountRenderer(namespace, SpeechSettings)
+  await vi.waitFor(() => expect(follower.container.textContent).toContain('动漫 · 轻柔明亮'))
+  expect(leader.speech.activeSpeechVoiceId).toBe('anime-playful')
+  expect(follower.speech.activeSpeechVoice?.name).toBe('动漫 · 轻快俏皮')
+  expect(follower.speech.activeSpeechVoice?.languages).toEqual([{ code: 'zh', title: 'Chinese' }])
+  expect(follower.container.querySelector('input[placeholder="Enter voice name (e.g., \'alloy\', \'echo\')"]')).toBeNull()
+  const voice = Array.from(follower.container.querySelectorAll('input')).find(input => input.value === 'anime-soft')
+  expect(voice).toBeDefined()
+  voice!.click()
+  await vi.waitFor(() => expect(leader.speech.activeSpeechVoiceId).toBe('anime-soft'))
+  await vi.waitFor(() => expect(cards.getModules(cards.activeCardId).speech.voice_id).toBe('anime-soft'))
 })
