@@ -36,6 +36,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'delete'): void
   (e: 'reply'): void
+  (e: 'context'): void
 }>()
 
 const { t } = useI18n()
@@ -106,6 +107,7 @@ const copyText = computed(() => getChatHistoryItemCopyText(props.message))
       @copy="emit('copy')"
       @delete="emit('delete')"
       @reply="emit('reply')"
+      @context="emit('context')"
     >
       <template #default="{ setMeasuredElement }">
         <div

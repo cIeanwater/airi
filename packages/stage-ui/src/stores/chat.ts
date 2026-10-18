@@ -26,6 +26,7 @@ import { useChatVision } from '../composables/vision/use-chat-vision'
 import { useVisionInference } from '../composables/vision/use-vision-inference'
 import { chatAssetIdFrom, inlineConversationAssets, storeChatAttachments } from '../libs/chat-assets'
 import { extractMessageText, isCloudSyncableMessage } from '../libs/chat-sync'
+import { createLocalMessageContextHeaders } from '../libs/local-message-context'
 import { createChatAnalyticsHooks, getProviderMode } from '../libs/product-signals/events/chat'
 import {
   AIRI_CHAT_APP_SURFACE_HEADER,
@@ -346,9 +347,9 @@ export const useChatStore = defineStore('chat', () => {
     let llmTextLength = 0
     let llmOutputChunkCount = 0
     const llmOutputChunkLengths: number[] = []
-    // Analytics correlation goes only to the official provider. A resolved step can change the provider, so each request rebuilds it.
-    function requestHeaders(providerId: string | undefined) {
-      const headers = { ...options?.headers }
+    // Each endpoint receives only its own correlation headers. Rebuild them after a model or provider change.
+    function requestHeaders(providerId: string | undefined, request: GenerationRequest) {
+      const headers = { ...options?.headers, ...createLocalMessageContextHeaders(request, options?.requestCorrelation) }
       if (getProviderMode(providerId ?? activeProvider.value) === 'official' && options?.requestCorrelation) {
         headers[AIRI_CHAT_SESSION_ID_HEADER] = options.requestCorrelation.conversationId
         headers[AIRI_CHAT_ROUND_ID_HEADER] = options.requestCorrelation.turnId
@@ -530,11 +531,11 @@ export const useChatStore = defineStore('chat', () => {
       await llmStore.stream(model, chatProvider, providerContext, {
         ...options,
         prepareStringContent: prepareTextOnlyAudioContext,
-        headers: requestHeaders(options?.providerId),
+        headers: requestHeaders(options?.providerId, chatProvider.generation(model)),
         resolveStep: resolveStep
           ? async () => {
             const step = await resolveStep()
-            return { ...step, headers: requestHeaders(step.providerId) }
+            return { ...step, headers: requestHeaders(step.providerId, step.chatProvider.generation(step.model)) }
           }
           : undefined,
         // Audio projection follows the model of each request. A tool step can switch between audio and text models.

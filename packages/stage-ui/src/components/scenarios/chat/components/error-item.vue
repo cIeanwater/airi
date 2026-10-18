@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'retry'): void
   (e: 'delete'): void
+  (e: 'context'): void
 }>()
 const { t } = useI18n()
 const detailsOpen = shallowRef(false)
@@ -68,11 +69,13 @@ const copyText = computed(() => getChatHistoryItemCopyText(props.message as Chat
     <ChatActionMenu
       :copy-text="copyText"
       :can-delete="!showPlaceholder"
+      :can-context="!showPlaceholder"
       :can-retry="canRetry && !showPlaceholder"
       :scroll-container="scrollContainer"
       @copy="emit('copy')"
       @retry="emit('retry')"
       @delete="emit('delete')"
+      @context="emit('context')"
     >
       <template #default="{ setMeasuredElement }">
         <div

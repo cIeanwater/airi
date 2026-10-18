@@ -7,22 +7,33 @@ describe('createChatActionMenuItems', () => {
     const items = createChatActionMenuItems({
       canReply: true,
       canCopy: true,
+      canContext: true,
       canRetry: true,
       canDelete: true,
       replyLabel: 'Reply',
+      copyLabel: 'Copy',
+      contextLabel: 'View full context',
+      deleteLabel: 'Delete',
+      retryLabel: 'Retry',
     })
 
-    expect(items.map(item => item.action)).toEqual(['reply', 'copy', 'retry', 'delete'])
-    expect(items[2]?.label).toBe('Retry')
+    expect(items.map(item => item.action)).toEqual(['reply', 'copy', 'context', 'retry', 'delete'])
+    expect(items[2]?.label).toBe('View full context')
+    expect(items[3]?.label).toBe('Retry')
   })
 
   it('omits retry when retry is unavailable', () => {
     const items = createChatActionMenuItems({
       canReply: false,
       canCopy: true,
+      canContext: false,
       canRetry: false,
       canDelete: true,
       replyLabel: 'Reply',
+      copyLabel: 'Copy',
+      contextLabel: 'View full context',
+      deleteLabel: 'Delete',
+      retryLabel: 'Retry',
     })
 
     expect(items.map(item => item.action)).toEqual(['copy', 'delete'])

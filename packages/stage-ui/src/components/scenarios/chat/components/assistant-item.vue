@@ -42,6 +42,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'delete'): void
   (e: 'reply'): void
+  (e: 'context'): void
   (e: 'toolCallRerun', payload: ToolCallRerunRequest): void
 }>()
 
@@ -123,24 +124,26 @@ const copyText = computed(() => getChatHistoryItemCopyText(props.message as Chat
 </script>
 
 <template>
-  <div flex :class="['font-cute', containerClass]" class="ph-no-capture">
+  <div :class="['flex font-cute ph-no-capture', containerClass]">
     <ChatActionMenu
       :copy-text="copyText"
       :can-reply="canReply"
       :can-delete="!showPlaceholder"
+      :can-context="!showPlaceholder"
       :press-feedback-enabled="variant === 'mobile'"
       :scroll-container="scrollContainer"
       @copy="emit('copy')"
       @delete="emit('delete')"
       @reply="emit('reply')"
+      @context="emit('context')"
     >
       <template #default="{ setMeasuredElement }">
         <div
           :ref="setMeasuredElement"
-          flex="~ col" shadow="sm primary-200/50 dark:none"
-          min-w-20 gap-2 rounded-xl h="unset <sm:fit"
           :class="[
             'chat-message-item-container',
+            'min-w-20 flex flex-col gap-2 rounded-xl h-unset <sm:h-fit',
+            'shadow-sm shadow-primary-200/50 dark:shadow-none',
             boxClasses,
             (isStageWeb() || isStageCapacitor()) && props.variant === 'mobile' ? 'select-none sm:select-auto' : '',
           ]"
@@ -151,10 +154,10 @@ const copyText = computed(() => getChatHistoryItemCopyText(props.message as Chat
             :message="message"
             :variant="variant"
           />
-          <div class="<sm:hidden">
-            <span text-sm text="black/60 dark:white/65" font-normal>{{ label }}</span>
+          <div :class="['<sm:hidden']">
+            <span :class="['text-sm text-black/60 dark:text-white/65 font-normal']">{{ label }}</span>
           </div>
-          <div v-if="resolvedSlices.length > 0" class="flex flex-col gap-2 break-words" text="primary-700 dark:primary-100">
+          <div v-if="resolvedSlices.length > 0" :class="['flex flex-col gap-2 break-words', 'text-primary-700 dark:text-primary-100']">
             <template v-for="(slice, sliceIndex) in resolvedSlices" :key="sliceIndex">
               <component
                 :is="getToolCallRenderer(slice)"
@@ -174,7 +177,7 @@ const copyText = computed(() => getChatHistoryItemCopyText(props.message as Chat
             </template>
           </div>
           <ResponseCitations v-if="message.citations?.length" :citations="message.citations" />
-          <div v-if="!resolvedSlices.length && showLoader" i-eos-icons:three-dots-loading />
+          <div v-if="!resolvedSlices.length && showLoader" :class="['i-eos-icons:three-dots-loading']" />
         </div>
       </template>
     </ChatActionMenu>

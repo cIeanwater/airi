@@ -39,20 +39,30 @@ class LocalSpeechStream {
 
   private async run() {
     try {
-      // Keep useful phrases intact while allowing the opening comma to start audio early.
-      for await (const phrase of chunkTtsInput(this.text, { boost: 2, minimumWords: 4, maximumWords: 16 })) {
+      // GPT-SoVITS needs a whole sentence for connected prosody. Its PCM streams before synthesis finishes.
+      const preserveSentence = this.options.model === 'gpt-sovits-v2proplus'
+      const boost = preserveSentence ? 0 : 2
+      const maximumWords = preserveSentence ? 24 : 16
+      for await (const phrase of chunkTtsInput(this.text, { boost, minimumWords: 4, maximumWords })) {
         this.abort.signal.throwIfAborted()
         if (!phrase.text.trim())
           continue
-        const response = await fetch(this.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: this.options.model, voice: this.options.voice, input: phrase.text, response_format: 'pcm', stream: true }),
-          signal: this.abort.signal,
-        })
-        if (!response.ok)
-          throw new Error(`Local speech returned HTTP ${response.status}`)
-        await this.playableBody(response, phrase.text)
+        // The Python service accepts 240 Unicode characters. The word chunker checks length only at punctuation.
+        const characters = Array.from(phrase.text)
+        const requestLength = preserveSentence ? 240 : characters.length
+        for (let offset = 0; offset < characters.length; offset += requestLength) {
+          this.abort.signal.throwIfAborted()
+          const text = characters.slice(offset, offset + requestLength).join('')
+          const response = await fetch(this.endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: this.options.model, voice: this.options.voice, input: text, response_format: 'pcm', stream: true }),
+            signal: this.abort.signal,
+          })
+          if (!response.ok)
+            throw new Error(`Local speech returned HTTP ${response.status}`)
+          await this.playableBody(response, text)
+        }
       }
       this.abort.signal.throwIfAborted()
       this.output.close()

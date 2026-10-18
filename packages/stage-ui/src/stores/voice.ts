@@ -23,7 +23,7 @@ import { createVoiceRephrasePlugin } from '../libs/voice/voice-rephrase-plugin'
 import { getSpeechBusContext, voiceGenerationEnded, voiceGetTurns, voiceInputCommand, voiceInputLevel, voiceInterrupt, voiceLevelMonitor, voiceRequestSnapshot, voiceRequestTurns, voiceSnapshotChanged, voiceSpeechCommand, voiceTurnsChanged } from '../services/speech/bus'
 import { SileroVad } from '../workers/vad/silero-vad'
 import { useLlmStreamingControlStore } from './ai/chat-llm/streaming-control'
-import { useAudioContext, useSpeakingStore } from './audio'
+import { useAudioContext } from './audio'
 import { useChatStore } from './chat'
 import { useChatSessionStore } from './chat/session-store'
 import { startsInputOnSpeech, useHearingStore } from './modules/hearing'
@@ -50,7 +50,6 @@ export const useVoiceStore = defineStore('voice', () => {
   const chat = useChatStore()
   const sessions = useChatSessionStore()
   const voiceMessages = useVoiceMessagesStore()
-  const speaking = useSpeakingStore()
   const streamingControl = useLlmStreamingControlStore()
   const wakeWordDetection = useWakeWordDetectionStore()
   const { stream: microphoneStream, enabled: microphoneEnabled, error: microphoneError } = storeToRefs(devices)
@@ -462,8 +461,8 @@ export const useVoiceStore = defineStore('voice', () => {
         const hasLiveTranscript = !!controller.activeInput?.input?.transcript.raw.text.trim()
         return endPauseMs() + (hearing.endJudgeEnabled && hasLiveTranscript ? VOICE_END_SILENCE.graceMs : 0)
       },
-      // Automatic barge-in requires platform echo cancellation or an external echo classifier.
-      acceptSpeech: options.acceptSpeech ?? (async () => !speaking.nowSpeaking || devices.source.echoCancellation),
+      // Track settings do not reliably report echo cancellation. Sustained VAD admits speech unless an external classifier rejects it.
+      acceptSpeech: options.acceptSpeech,
       // Wake word mode returns no target, so VAD alone cannot start an input. A wake supplies its own target.
       target: () => sessions.activeSessionId && hearing.configured && startsInputOnSpeech(hearing.inputMode)
         ? { sessionId: sessions.activeSessionId, interruptTurns: activeTurns.value.filter(turn => turn.sessionId === sessions.activeSessionId) }

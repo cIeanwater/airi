@@ -11,18 +11,18 @@ The AIRI application framework, character renderers, and provider interfaces com
 
 | Area | Current work | Details |
 | --- | --- | --- |
-| Local inference | Qwen3.5-2B with BF16 parameters, an OpenAI-compatible API, and JSON or SSE responses | [Model service](docs/ai/local-qwen35-2b-bf16.zh-CN.md) |
+| Local inference | Gemma 4 E2B QAT INT4 on the GPU, a 16K context, and JSON or SSE responses | [Model service](docs/ai/local-gemma4-int4.zh-CN.md) |
 | Long-term memory | Consent for each user and character, local retrieval, editing, deletion, and JSON import/export | [Memory package](packages/memory-local/README.md) |
 | Memory evaluation | Reproducible LongMemEval-S retrieval runs, pinned data, machine-readable reports, and stated limits | [Evaluation](packages/memory-local/benchmarks/README.md) |
 | Durable conversations | Wait for assistant storage before completion, export current messages, and reject stale account writes | [Persistence](docs/ai/adr/2026-10-16-local-chat-persistence.zh-CN.md) |
-| Actual model messages | Optional local JSON files with request messages, the rendered prompt, responses, tool calls, and errors | [Message JSON](docs/ai/local-message-json.zh-CN.md) |
-| Voice interaction | Bundled offline VAD, automatic turn submission, speech playback, and tests of the complete local flow | [Voice conversation](docs/ai/local-voice-conversation.zh-CN.md) |
+| Actual model messages | A message menu opens the recorded request, rendered prompt, model output, and tool rounds as JSON | [Context and persona editing](docs/ai/companion-context-editing.zh-CN.md) |
+| Voice interaction | Streaming recognition and speech, automatic turn submission, and speech interruption | [Voice conversation](docs/ai/local-voice-conversation.zh-CN.md) |
 | Avatar interaction | Emotion and motion controls, valid motion selection, Live2D expressions, and audio-driven mouth movement | [Expression evidence](docs/ai/validation/2026-10-17-voice-expression-link.zh-CN.md) |
 
-The local voice preset uses a 60 MB bilingual streaming Zipformer recognizer, Smart Turn v3.2, and MOSS-TTS-Nano ONNX on the CPU.
-Qwen3.5-2B keeps its BF16 parameters on the GPU. The desktop started playing a known Chinese response in 314 ms after receiving its text.
-See the [measured latency and model tradeoffs](docs/ai/research/2026-10-17-fast-local-voice.zh-CN.md). This playback measurement excludes recognition and chat-model time.
-MOSS uses text and punctuation for prosody. ACT controls avatar expressions; this model does not accept emotion instructions.
+The local preset uses a 60 MB bilingual streaming Zipformer recognizer and Smart Turn v3.2 on the CPU.
+GPT-SoVITS v2ProPlus uses a synthetic reference for a bright Chinese student voice. Its FP16 synthesis core runs on the GPU.
+CPU feature models preserve GPU memory for Gemma and its context cache.
+See the [voice measurements and limits](docs/ai/research/2026-10-18-compact-student-voice.zh-CN.md). ACT controls avatar expressions. This voice does not accept emotion instructions.
 
 ## Data that you can inspect
 
@@ -81,6 +81,7 @@ See the [protocol and reports](packages/memory-local/benchmarks/README.md) for b
 
 Recent integration records:
 
+- [Gemma, streaming speech, interruption, and message context](docs/ai/validation/2026-10-18-streaming-context-companion.zh-CN.md)
 - [Fast local voice, direct startup, and local mode](docs/ai/validation/2026-10-17-fast-local-companion.zh-CN.md)
 - [Audio, model replies, and persistence](docs/ai/validation/2026-10-16-local-audio-chat-persistence.zh-CN.md)
 - [Offline voice detection](docs/ai/validation/2026-10-17-offline-voice-detection.zh-CN.md)

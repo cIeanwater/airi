@@ -73,6 +73,8 @@ export interface StreamOptions {
   requestCorrelation?: {
     conversationId: string
     turnId: string
+    /** Durable assistant message ID used by the local request inspector. */
+    messageId?: string
     runId?: string
   }
   /**

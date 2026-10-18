@@ -106,6 +106,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools-dir", type=Path, default=ROOT.parent / ".tools")
     parser.add_argument("--models-dir", type=Path, default=ROOT / "local-models")
+    parser.add_argument("--llm", choices=("gemma", "qwen"), default="gemma")
+    parser.add_argument("--tts", choices=("gpt-sovits", "moss"), default="gpt-sovits")
+    parser.add_argument("--context-size", type=int, default=16384)
     parser.add_argument("--node-path", type=Path, default=os.environ.get("HUMANNING_NODE") or None,
                         help="Use an explicit Node.js executable for the desktop")
     parser.add_argument("--services-only", action="store_true")
@@ -114,13 +117,16 @@ def main():
     args = parser.parse_args()
     if os.name != "nt":
         parser.error("This launcher uses the prepared Windows runtimes. Start each service directly on other systems.")
+    if not 4096 <= args.context_size <= 131072:
+        parser.error("context-size must be between 4096 and 131072 tokens")
     tools = args.tools_dir.resolve()
     models = args.models_dir.resolve()
     asr_root = tools / "fast-asr"
-    tts_root = tools / "moss-tts-nano"
+    tts_root = tools / ("gpt-sovits-v2proplus" if args.tts == "gpt-sovits" else "moss-tts-nano")
     turn_root = tools / "smart-turn-v3.2"
     llm_python = models / "airllm-cuda-venv/Scripts/python.exe"
-    tts_python = tts_root / "venv/Scripts/python.exe"
+    tts_python = (tools / "gpt-sovits-venv/Scripts/python.exe" if args.tts == "gpt-sovits"
+                  else tts_root / "venv/Scripts/python.exe")
     asr_python = asr_root / "venv/Scripts/python.exe"
     turn_python = turn_root / "venv/Scripts/python.exe"
     desktop_root = ROOT / "apps/stage-tamagotchi"
@@ -132,15 +138,35 @@ def main():
         ROOT / "scripts/serve-qwen35-2b-bf16.py",
         ROOT / "scripts/serve-fast-asr.py",
         ROOT / "scripts/serve-smart-turn.py",
-        ROOT / "scripts/serve-local-moss-tts.py",
-        models / "qwen3.5-2b-bf16/config.json",
-        models / "qwen3.5-2b-bf16/model.safetensors-00001-of-00001.safetensors",
-        tts_root / "MOSS-TTS-Nano-main/ort_cpu_runtime.py",
-        tts_root / "models/MOSS-TTS-Nano-100M-ONNX/browser_poc_manifest.json",
-        tts_root / "models/MOSS-TTS-Nano-100M-ONNX/moss_tts_global_shared.data",
-        tts_root / "models/MOSS-TTS-Nano-100M-ONNX/moss_tts_local_shared.data",
+        ROOT / "scripts/local-message-context.py",
         turn_root / "smart-turn-v3.2-cpu.onnx",
     ]
+    if args.tts == "gpt-sovits":
+        required.extend([ROOT / "scripts/serve-local-gpt-sovits.py",
+                         tools / "modern-voice-2026-10-17/vivian-curious.wav",
+                         tts_root / "publisher-manifest.json",
+                         tts_root / "GPT_SoVITS/TTS_infer_pack/TTS.py"])
+        required.extend(tts_root / "GPT_SoVITS/pretrained_models" / name for name in (
+            "s1v3.ckpt", "v2Pro/s2Gv2ProPlus.pth", "sv/pretrained_eres2netv2w24s4ep4.ckpt",
+            "chinese-roberta-wwm-ext-large/pytorch_model.bin", "chinese-roberta-wwm-ext-large/config.json",
+            "chinese-roberta-wwm-ext-large/tokenizer.json", "chinese-hubert-base/pytorch_model.bin",
+            "chinese-hubert-base/config.json", "chinese-hubert-base/preprocessor_config.json", "fast_langdetect/lid.176.bin"))
+        required.extend(tts_root / "GPT_SoVITS/text/G2PWModel" / name for name in (
+            "g2pW.onnx", "config.py", "POLYPHONIC_CHARS.txt", "MONOPHONIC_CHARS.txt",
+            "char_bopomofo_dict.json", "bopomofo_to_pinyin_wo_tune_dict.json"))
+    else:
+        required.extend([ROOT / "scripts/serve-local-moss-tts.py",
+                         tts_root / "MOSS-TTS-Nano-main/ort_cpu_runtime.py",
+                         tts_root / "models/MOSS-TTS-Nano-100M-ONNX/browser_poc_manifest.json",
+                         tts_root / "models/MOSS-TTS-Nano-100M-ONNX/moss_tts_global_shared.data",
+                         tts_root / "models/MOSS-TTS-Nano-100M-ONNX/moss_tts_local_shared.data"])
+    if args.llm == "gemma":
+        required.extend([ROOT / "scripts/serve-local-gemma.py",
+                         models / "runtime/llama.cpp-b11146-vulkan/llama-server.exe",
+                         models / "gemma4-e2b-int4/gemma-4-E2B_q4_0-it.gguf"])
+    else:
+        required.extend([models / "qwen3.5-2b-bf16/config.json",
+                         models / "qwen3.5-2b-bf16/model.safetensors-00001-of-00001.safetensors"])
     required.extend(asr_root / "zipformer-bilingual-small" / name for name in (
         "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.onnx",
         "joiner-epoch-99-avg-1.int8.onnx", "tokens.txt"))
@@ -153,6 +179,7 @@ def main():
     if args.check:
         print(json.dumps({"prepared_paths": True, "files_checked": len(required),
                           "desktop_node": str(desktop_node) if desktop_node else None,
+                          "llm": args.llm, "context_size": args.context_size, "tts": args.tts,
                           "note": "This checks file presence and the desktop Node version. Each model service checks its weights at startup."}))
         return 0
 
@@ -167,19 +194,43 @@ def start_services(args, tools, models, logs, llm_python, asr_python, turn_pytho
                    asr_root, turn_root, tts_root, desktop_root, desktop_node, desktop_cli):
     environment = {**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
                    "HF_HUB_DISABLE_TELEMETRY": "1", "PYTHONDONTWRITEBYTECODE": "1"}
-    llm_arguments = [str(llm_python), "-u", str(ROOT / "scripts/serve-qwen35-2b-bf16.py"),
-                     "--model-path", str(models / "qwen3.5-2b-bf16"), "--port", "18083", "--release-cuda-cache"]
+    if args.llm == "gemma":
+        llm_arguments = [str(llm_python), "-u", str(ROOT / "scripts/serve-local-gemma.py"),
+                         "--port", "18083", "--upstream", "http://127.0.0.1:18088", "--warmup"]
+        llm_id = "gemma4-e2b-int4"
+    else:
+        llm_arguments = [str(llm_python), "-u", str(ROOT / "scripts/serve-qwen35-2b-bf16.py"),
+                         "--model-path", str(models / "qwen3.5-2b-bf16"), "--port", "18083", "--release-cuda-cache"]
+        llm_id = "qwen3.5-2b-bf16"
     if not args.no_message_recording:
         llm_arguments.extend(["--record-messages-dir", str(tools / "airi-message-records")])
+    if args.tts == "gpt-sovits":
+        tts_arguments = [str(tts_python), "-u", str(ROOT / "scripts/serve-local-gpt-sovits.py"),
+                         "--runtime-dir", str(tts_root), "--reference",
+                         str(tools / "modern-voice-2026-10-17/vivian-curious.wav"),
+                         "--port", "18084", "--threads", "4"]
+        tts_id = "gpt-sovits-v2proplus"
+    else:
+        tts_arguments = [str(tts_python), "-u", str(ROOT / "scripts/serve-local-moss-tts.py"),
+                         "--runtime-dir", str(tts_root), "--port", "18084", "--threads", "2"]
+        tts_id = "moss-tts-nano-100m"
     services = [
         ("asr", 18086, [str(asr_python), "-u", str(ROOT / "scripts/serve-fast-asr.py"), "--model-dir",
                         str(asr_root / "zipformer-bilingual-small"), "--port", "18086", "--ws-port", "18087", "--threads", "2"], ROOT, environment, "zipformer-small-zh-en-int8"),
         ("turn", 18085, [str(turn_python), "-u", str(ROOT / "scripts/serve-smart-turn.py"), "--model",
                          str(turn_root / "smart-turn-v3.2-cpu.onnx"), "--port", "18085", "--threads", "2"], ROOT, environment, "smart-turn-v3.2-cpu"),
-        ("llm", 18083, llm_arguments, ROOT, environment, "qwen3.5-2b-bf16"),
-        ("tts", 18084, [str(tts_python), "-u", str(ROOT / "scripts/serve-local-moss-tts.py"), "--runtime-dir",
-                        str(tts_root), "--port", "18084", "--threads", "2"], ROOT, environment, "moss-tts-nano-100m"),
     ]
+    if args.llm == "gemma":
+        services.append(("llm-engine", 18088, [str(models / "runtime/llama.cpp-b11146-vulkan/llama-server.exe"),
+            "--model", str(models / "gemma4-e2b-int4/gemma-4-E2B_q4_0-it.gguf"),
+            "--host", "127.0.0.1", "--port", "18088", "--alias", llm_id,
+            "--ctx-size", str(args.context_size), "--parallel", "1", "--gpu-layers", "all",
+            "--flash-attn", "on", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
+            "--reasoning", "off"], ROOT, environment, llm_id))
+    services.extend([
+        ("llm", 18083, llm_arguments, ROOT, environment, llm_id),
+        ("tts", 18084, tts_arguments, ROOT, environment, tts_id),
+    ])
     if not args.services_only:
         desktop_environment = create_desktop_environment(environment, desktop_node, tools)
         services.append(("desktop", 9250, [str(desktop_node), str(desktop_cli), "dev"], desktop_root, desktop_environment, None))
@@ -191,6 +242,10 @@ def start_services(args, tools, models, logs, llm_python, asr_python, turn_pytho
 
             def ready():
                 health = get_health(port, path)
+                if name == "llm-engine":
+                    catalog = get_health(port, "/v1/models")
+                    return (isinstance(health, dict) and health.get("status") == "ok"
+                            and isinstance(catalog, dict) and any(model.get("id") == expected_model for model in catalog.get("data", [])))
                 if expected_model and isinstance(health, dict):
                     return health.get("status") == "ready" and health.get("model_id", health.get("model")) == expected_model
                 if name == "desktop":

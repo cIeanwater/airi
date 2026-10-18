@@ -953,6 +953,7 @@ export function createChatOrchestratorRuntime(deps: ChatOrchestratorRuntimeDeps)
         requestCorrelation: {
           conversationId: correlation.conversationId,
           turnId: correlation.roundId,
+          messageId: assistantMessageId,
         },
         tools: options.tools,
         temperature: options.temperature,

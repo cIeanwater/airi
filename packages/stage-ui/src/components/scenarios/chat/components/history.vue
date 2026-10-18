@@ -8,7 +8,7 @@ import type { ChatToolCallRendererRegistry } from './tool-call-renderer'
 
 import { useNow } from '@vueuse/core'
 import { Virtualizer } from 'virtua/vue'
-import { computed, useTemplateRef } from 'vue'
+import { computed, shallowRef, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import ChatAssistantItem from './assistant-item.vue'
@@ -16,6 +16,7 @@ import ChatHistoryScrollContainer from './chat-history-scroll-container.vue'
 import ChatErrorItem from './error-item.vue'
 import ChatHistoryMessageFrame from './history-message-frame.vue'
 import ChatHistoryTimeSeparator from './history-time-separator.vue'
+import MessageContextDialog from './message-context-dialog.vue'
 import ChatUserItem from './user-item.vue'
 
 import { useChatHistoryScroll } from '../composables/use-chat-history-scroll'
@@ -91,6 +92,8 @@ const CHAT_HISTORY_OVERSCAN = 600
 const scrollContainerRef = useTemplateRef<InstanceType<typeof ChatHistoryScrollContainer>>('scroll-container')
 const chatHistoryRef = computed<HTMLElement | null>(() => scrollContainerRef.value?.viewport ?? null)
 const virtualizerRef = useTemplateRef<VirtualizerHandle>('virtualizer')
+const contextMessage = shallowRef<ChatHistoryItem>()
+const contextOpen = shallowRef(false)
 const tailInset = computed(() => props.tailInset)
 const { scrollToIndex } = useVirtualizerScroll({
   tailInset,
@@ -192,6 +195,11 @@ function emitCopyMessage(message: ChatHistoryItem, index: number) {
     index,
     key: getChatHistoryItemKey(message, index),
   })
+}
+
+function showMessageContext(message: ChatHistoryItem) {
+  contextMessage.value = message
+  contextOpen.value = true
 }
 
 function emitDeleteMessage(message: ChatHistoryItem, index: number) {
@@ -298,6 +306,7 @@ function emitToolCallRerun(
               @copy="emitCopyMessage(message, index)"
               @retry="emitRetryMessage(message, index)"
               @delete="emitDeleteMessage(message, index)"
+              @context="showMessageContext(message)"
             />
             <ChatAssistantItem
               v-else-if="message.role === 'assistant'"
@@ -313,6 +322,7 @@ function emitToolCallRerun(
               @copy="emitCopyMessage(message, index)"
               @delete="emitDeleteMessage(message, index)"
               @reply="emitReplyMessage(message)"
+              @context="showMessageContext(message)"
               @tool-call-rerun="emitToolCallRerun(message, index, $event)"
             />
             <ChatUserItem
@@ -327,10 +337,12 @@ function emitToolCallRerun(
               @copy="emitCopyMessage(message, index)"
               @delete="emitDeleteMessage(message, index)"
               @reply="emitReplyMessage(message)"
+              @context="showMessageContext(message)"
             />
           </ChatHistoryMessageFrame>
         </div>
       </template>
     </Virtualizer>
   </ChatHistoryScrollContainer>
+  <MessageContextDialog v-if="contextMessage" v-model:open="contextOpen" :message="contextMessage" />
 </template>
