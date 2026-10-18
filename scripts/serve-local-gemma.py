@@ -21,7 +21,6 @@ MAX_BODY_BYTES = 1024 * 1024
 SPEC = importlib.util.spec_from_file_location("local_qwen_protocol", ROOT / "scripts/serve-qwen35-2b-bf16.py")
 SHARED = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SHARED)
-CONTEXT = SHARED._context_module
 
 
 class UpstreamProtocolError(ValueError):
@@ -187,8 +186,7 @@ def create_server(port: int, upstream_url: str, recorder, max_output: int = 512)
             return json.loads(self.rfile.read(length), parse_constant=SHARED.reject_nonfinite_json)
 
         def lookup(self, query: dict) -> None:
-            result = CONTEXT.read_local_message_context(recorder.directory, query,
-                max_age_days=recorder.max_age_days, max_records=recorder.max_records)
+            result = recorder.read_context(query)
             self.response(200, result)
 
         def do_OPTIONS(self) -> None:
