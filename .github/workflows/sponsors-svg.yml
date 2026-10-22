@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   generate:
+    # Forks do not inherit the upstream funding accounts or provider tokens.
+    if: ${{ github.repository == 'moeru-ai/airi' || vars.ENABLE_SPONSORS_WORKFLOW == 'true' }}
     runs-on: ubuntu-latest
     env:
       SPONSORKIT_PATREON_TOKEN: ${{ secrets.SPONSORKIT_PATREON_TOKEN }}

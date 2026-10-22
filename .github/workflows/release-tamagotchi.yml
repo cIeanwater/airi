@@ -46,6 +46,8 @@ on:
 
 jobs:
   build:
+    # Keep manual builds available. Forks opt in to daily multi-platform release builds.
+    if: ${{ github.event_name != 'schedule' || github.repository == 'moeru-ai/airi' || vars.ENABLE_NIGHTLY_RELEASES == 'true' }}
     name: Build
     continue-on-error: ${{ matrix.skip }} # WORKAROUND: Skipping subsequent steps without failing the whole workflow
     env:
@@ -120,40 +122,25 @@ jobs:
           xcodebuild -version
           actool --version
 
-      # NOTICE:
-      # pnpm 11 does not ship a working standalone executable for Intel macOS.
-      # Install pnpm through npm so it uses the Node.js runtime from setup-node.
-      # https://github.com/pnpm/pnpm/issues/11423
-      # Remove this branch when the project uses pnpm 12 or later.
+      # Use the Node package on every platform, avoiding standalone pnpm bootstrap downloads.
       - uses: actions/setup-node@v6
-        if: matrix.os == 'macos-15-intel'
         with:
           node-version: 26.7.0
 
       - name: Install pnpm with npm
-        if: matrix.os == 'macos-15-intel'
-        run: npm install --global pnpm@11.24.0
+        run: npm install --global pnpm@11.24.0 --fetch-retries=5 --fetch-timeout=120000
 
       - name: Get pnpm store path
-        if: matrix.os == 'macos-15-intel'
         id: pnpm-store
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
-        if: matrix.os == 'macos-15-intel'
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
-
-      - uses: pnpm/setup@v2
-        if: matrix.os != 'macos-15-intel'
-        with:
-          runtime: node@26.7.0
-          cache: true
-          install: false
 
       - name: Install macOS System Dependencies for node-canvas
         if: runner.os == 'macOS'

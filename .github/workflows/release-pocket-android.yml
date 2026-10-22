@@ -24,6 +24,8 @@ on:
 
 jobs:
   build:
+    # Local desktop forks opt in before running signed mobile releases on a schedule.
+    if: ${{ github.event_name != 'schedule' || github.repository == 'moeru-ai/airi' || vars.ENABLE_MOBILE_RELEASES == 'true' }}
     name: Build Android APK
     runs-on: ubuntu-latest
     env:
@@ -40,6 +42,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: pnpm/setup@v2
         with:
