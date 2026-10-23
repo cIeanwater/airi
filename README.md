@@ -58,6 +58,7 @@ pnpm dev:tamagotchi
 ```
 
 On the prepared Windows installation, double-click **`Start-Humanning.cmd`** to start the local model services and desktop together.
+For prepared QQ installations, this entry also starts or reuses NapCat and Koishi. See the [QQ startup guide](docs/ai/qq-one-click-startup.zh-CN.md).
 It reuses healthy services and the existing desktop data directory. See the [local startup guide](docs/ai/local-voice-conversation.zh-CN.md) for preparation and settings.
 Local mode is the default: login, account sync, hosted providers, and product telemetry are disabled. Developers can explicitly set `VITE_AIRI_LOCAL_MODE=false` to enable connected features.
 

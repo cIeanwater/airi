@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "qqConfig": "airi-stage1-desktop-profile/companion/qq.json",
+  "waitSeconds": 90,
+  "napcat": {
+    "command": ["D:/YOUR_NAPCAT/NapCatWinBootMain.exe", "YOUR_BOT_QQ_ID"],
+    "cwd": "D:/YOUR_NAPCAT",
+    "port": 3001
+  },
+  "koishi": {
+    "command": ["C:/Program Files/Koishi/Desktop/bin/koishi.exe", "C:/Users/YOU/AppData/Roaming/Koishi/Desktop/data/instances/default/node_modules/koishi/bin.js", "start"],
+    "cwd": "C:/Users/YOU/AppData/Roaming/Koishi/Desktop/data/instances/default"
+  }
+}

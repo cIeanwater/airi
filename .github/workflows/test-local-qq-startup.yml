@@ -1,0 +1,37 @@
+name: Test Local QQ Startup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Start-Humanning.cmd
+      - scripts/start-local-companion.py
+      - scripts/test-local-companion-launcher.py
+      - scripts/start-local-voice.py
+      - configs/local-qq-startup.example.json
+      - .github/workflows/test-local-qq-startup.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Start-Humanning.cmd
+      - scripts/start-local-companion.py
+      - scripts/test-local-companion-launcher.py
+      - scripts/start-local-voice.py
+      - configs/local-qq-startup.example.json
+      - .github/workflows/test-local-qq-startup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qq-startup:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check QQ startup without QQ accounts or model weights
+        run: python -B scripts/test-local-companion-launcher.py -v

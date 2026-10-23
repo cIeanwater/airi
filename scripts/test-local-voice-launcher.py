@@ -433,6 +433,7 @@ class LauncherPreflightTests(unittest.TestCase):
     def run_batch(self, *arguments):
         batch = self.root / "Start-Humanning.cmd"
         write_file(batch, (ROOT / "Start-Humanning.cmd").read_text(encoding="utf-8"))
+        write_file(self.root / "scripts/start-local-companion.py", (ROOT / "scripts/start-local-companion.py").read_text(encoding="utf-8"))
         venv.EnvBuilder(with_pip=False).create(self.root / "local-models/airllm-cuda-venv")
         command = subprocess.list2cmdline([str(batch), "--tools-dir", str(self.tools),
                                            "--models-dir", str(self.models), *arguments])

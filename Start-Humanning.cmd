@@ -8,7 +8,7 @@ if not exist "%HUMANNING_PYTHON%" (
   pause
   exit /b 1
 )
-"%HUMANNING_PYTHON%" "%~dp0scripts\start-local-voice.py" %*
+"%HUMANNING_PYTHON%" -B "%~dp0scripts\start-local-companion.py" %*
 if errorlevel 1 (
   echo Humanning could not start. Read the error above and .tools\local-voice-logs in the parent folder.
   pause
