@@ -1,0 +1,13 @@
+{
+  "model": "local-models/gemma4-e2b-it-hf",
+  "device": 0,
+  "qlora": true,
+  "rank": 8,
+  "max_length": 512,
+  "learning_rate": 0.00005,
+  "epochs": 1,
+  "gradient_accumulation": 16,
+  "seed": 42,
+  "reasoning_format": "gemma4-native",
+  "target_modules": ["q_proj", "v_proj"]
+}

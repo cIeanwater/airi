@@ -1,0 +1,6 @@
+{
+  "base": 0.5,
+  "dialogue": 0.2,
+  "persona": 0.2,
+  "reasoning": 0.1
+}
