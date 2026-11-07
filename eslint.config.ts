@@ -34,6 +34,9 @@ export default defineConfig({
     'packages/memory-local/benchmarks/data/**',
     'packages/memory-local/benchmarks/runs/**',
     'packages/memory-local/benchmarks/reports/**',
+    'rsi/private/**',
+    'rsi/runs/**',
+    'rsi/.venv/**',
     '.agents/**',
     '.github/**',
     'CLAUDE.md', // Skip the symbolic link
