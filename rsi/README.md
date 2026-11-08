@@ -5,6 +5,93 @@ It owns experience records, verification, candidate experiments, strategy learni
 The Python standard library runs capture, evaluation, replay, scheduling, and the synthetic demonstration.
 Transformers and PEFT are optional training dependencies.
 
+## Clean captured data and prepare local LoRA
+
+`curate.py` snapshots capture files and prepares private semantic review packets.
+`cleaning.py` checks source integrity, tool traces, output status, and scoped identity rules.
+The prompts in `prompts/` select examples, compress explicit thinking into Chinese, and review the result.
+These commands do not call a remote model or send private data to another provider.
+
+Create three local configuration files under `rsi/private/`:
+
+- `collections.json`: paths named `events`, `companion`, and `gateway` for the capture collections.
+- `scope.json`: one `user_id` and `character_id` for this corpus.
+- `policy.json`: the scoped `character_name` and `person_names` for identity checks.
+
+Use a new directory for every snapshot, extraction, packet set, and final dataset:
+
+```powershell
+python -m rsi.curate snapshot --collections rsi/private/collections.json --output rsi/private/corpus-001/snapshot
+python -m rsi.curate extract --snapshot rsi/private/corpus-001/snapshot --scope rsi/private/scope.json --policy rsi/private/policy.json --output rsi/private/corpus-001/extracted
+python -m rsi.curate batches --candidates rsi/private/corpus-001/extracted/candidates.jsonl --output rsi/private/corpus-001/packets
+```
+
+An event collection uses `*/archive/events/*.json`. Request collections use their top-level JSON files.
+Snapshots preserve source bytes and record file hashes.
+The extractor keeps the actual model input, output, tools, and causal order.
+It does not manufacture dialogue from event prose or insert invented user messages.
+Application state can occupy a recorded `user` role. That role does not establish human authorship.
+
+Review each packet with `clean-corpus.txt` and `compress-thinking.txt`.
+For truncated packet views, read the full candidate before acceptance.
+Use `review-cleaned.txt` for a separate review of selected results.
+Store each reviewer response as JSONL under the private run directory.
+Each response binds its decision to `candidate_id` and `candidate_sha256`.
+Acceptance requires the explicit checks and resolved issues listed in the cleaning prompt.
+Reviewers can reject or quarantine an example without replacing its answer.
+The collector rejects missing, repeated, stale, or incomplete acceptance decisions.
+
+```powershell
+python -m rsi.curate collect-reviews --candidates rsi/private/corpus-001/extracted/candidates.jsonl --reviews rsi/private/corpus-001/packets/suppressed-reviews.jsonl --reviews rsi/private/corpus-001/reviews.jsonl --output rsi/private/corpus-001/all-reviews.jsonl
+python -m rsi.curate finalize --candidates rsi/private/corpus-001/extracted/candidates.jsonl --reviews rsi/private/corpus-001/all-reviews.jsonl --output rsi/private/corpus-001/dataset
+```
+
+Redundant targets enter quarantine. This decision does not assert semantic failure.
+Finalization changes only the selected assistant reasoning channel to its reviewed Chinese summary.
+It preserves final answers, structured output fields, tool arguments, and historical thinking in the causal prefix.
+The loss compiler masks that prefix. It trains only selected assistant targets.
+Invalid reasoning enters quarantine instead of becoming a fluent corrected claim.
+
+Outputs include SFT JSONL, raw-to-short reasoning pairs, review decisions, hashes, and an inspection report.
+Group connections use sessions, source lineage, and identical prompts before temporal splitting.
+Unlinked requests share a conservative group. They do not become independent examples through random splitting.
+Fewer than ten independent groups produce a train-only export with a blocked training-readiness flag.
+The corpus export does not automatically supply base replay or establish a successful RSI experiment.
+
+`finetune.py` runs the local LoRA workflow for this cleaned format.
+Prepare an isolated Python environment with a compatible CUDA PyTorch build and `requirements.txt`.
+Copy `train-config.example.json` into `rsi/private/` and set local original Hugging Face model and tokenizer paths.
+An inference GGUF file cannot replace those training weights.
+Both ordinary LoRA and four-bit QLoRA use PEFT adapters. The example selects QLoRA for lower memory use.
+
+```powershell
+./rsi/train-local.ps1 -Dataset rsi/private/corpus-001/dataset -Config rsi/private/train.json -Action Check
+./rsi/train-local.ps1 -Dataset rsi/private/corpus-001/dataset -Config rsi/private/train.json -Action Tokenize -Report rsi/private/tokenization.json
+./rsi/train-local.ps1 -Dataset rsi/private/corpus-001/dataset -Config rsi/private/train.json -Action Train -Method qlora -Output rsi/runs/lora-001
+./rsi/train-local.ps1 -Config rsi/private/train.json -Action Merge -Adapter rsi/runs/lora-001/adapter -Output rsi/runs/merged-001
+```
+
+Use `-Method lora` for an unquantized base. Set `-Python` to select another isolated environment.
+The default action checks readiness. Training requires the explicit `Train` action.
+Tokenization uses the native chat template without weights or an optimizer.
+It reports full sequence and target lengths, including overlength failures. It does not truncate examples.
+To quarantine overlength rows, apply the tokenizer report and finalize a new dataset:
+
+```powershell
+python -m rsi.curate budget-reviews --dataset rsi/private/corpus-001/dataset --reviews rsi/private/corpus-001/all-reviews.jsonl --token-report rsi/private/tokenization.json --output rsi/private/corpus-001/budget-reviews.jsonl
+python -m rsi.curate finalize --candidates rsi/private/corpus-001/extracted/candidates.jsonl --reviews rsi/private/corpus-001/budget-reviews.jsonl --output rsi/private/corpus-001/dataset-budget
+```
+
+Use that new dataset for another tokenizer check and training.
+Training checks dataset hashes, scopes, independent splits, dependencies, and a CUDA kernel before model load.
+It records adapter lineage, optimizer checkpoints, validation loss, and held-out test loss.
+Merge checks the original base, scope, and tokenizer. It loads a full-precision CPU base and saves a separate candidate.
+It does not merge into quantized inference weights or replace the active server.
+Loss changes alone do not establish persona quality, tool reliability, or promotion eligibility.
+The `cycle` workflow below uses normalized episodes and independent evidence for automatic release decisions.
+The local runner uses one visible GPU at logical device zero. Select another physical GPU with `CUDA_VISIBLE_DEVICES`.
+Capture earlier tool decisions as normalized episodes with per-decision evidence. Corpus extraction selects each request's final assistant target.
+
 ## Start with the synthetic walkthrough
 
 Run these commands from the repository root:
@@ -91,7 +178,7 @@ Prepare a separate environment with a CUDA PyTorch build and `rsi/requirements.t
 The local GGUF inference files cannot serve as the original Transformers training checkpoint.
 Prepare pinned Hugging Face E2B weights and tokenizer files before execution.
 The example uses one GPU, rank 8, context 512, batch 1, and 20 optimizer steps.
-Actual peak memory and real E2B tokenizer behavior still require a hardware smoke test.
+Measure peak memory with an actual training smoke test. The cleaned-corpus commands support a separate native tokenizer check.
 
 ```powershell
 python -m rsi train --config TRAINING.json --dataset DATASET_DIRECTORY --output rsi/runs/train-001
@@ -212,7 +299,7 @@ Uncertain imported records remain excluded. No live service starts when this mod
 ## Implementation limits
 
 The tests exercise synthetic protocols, controlled receipts, state recovery, and orchestration boundaries.
-No real E2B training, provider judging, or production deployment was performed for this implementation.
+No real E2B optimizer step or production deployment was performed for this implementation.
 Actual training needs the original checkpoint, compatible CUDA packages, verified episodes, and independent evaluation fixtures.
 The initial materializer does not reproduce SEAL's complete synthetic-data search.
 The package exposes the proposer learning and release path without claiming that a better proposer already exists.
