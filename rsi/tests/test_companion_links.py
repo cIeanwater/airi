@@ -4,6 +4,7 @@ import copy
 import unittest
 
 from rsi.common import canonical, digest
+from rsi.companion_corpus import HOST_MARKER
 from rsi.companion_links import check_companion_links
 
 
@@ -52,6 +53,21 @@ class CompanionLinkTests(unittest.TestCase):
         parent["group"] = "unrelated"
         with self.assertRaisesRegex(ValueError, "same timeline group"):
             check_companion_links([parent, child])
+
+    def test_organizer_uses_the_exact_extraction(self):
+        extracted = "对方已明确撤回剧透许可。"
+        extract = row("extract", [message("assistant", extracted, 1)], lane="extract")
+        host = HOST_MARKER + canonical({"extractedUnderstanding": extracted}).decode()
+        organize = row("organize", [message("system", host)], lane="organize", downstream_of="extract",
+                       extraction_source=extracted)
+        self.assertEqual(check_companion_links([extract, organize])["used_extractions"], 1)
+        organize["messages"][0]["content"] = host.replace("撤回", "保留")
+        with self.assertRaisesRegex(ValueError, "differs from the preceding extraction"):
+            check_companion_links([extract, organize])
+        extract["messages"][-1]["content"] = "NO_UPDATE"
+        organize["refinement"]["extraction_source"] = "NO_UPDATE"
+        with self.assertRaisesRegex(ValueError, "differs from the preceding extraction"):
+            check_companion_links([extract, organize])
 
 
 if __name__ == "__main__":

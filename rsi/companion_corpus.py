@@ -69,20 +69,27 @@ def _check_documents(output, host):
 
 
 def check_companion_spec(spec):
-    """Check short rationale, ACT, host policy, and evidence IDs."""
+    """Check reasoning, ACT, host policy, and evidence IDs."""
     messages = spec["messages"]
     refinement = spec["refinement"]
     profile = refinement.get("lane", spec["kind"])
     if profile not in {"dialogue", "initiative", "extract", "organize"}:
         raise ValueError("Expected an AIRI dialogue or reflection lane")
+    reasoning_profile = refinement.get("reasoning_profile", "brief")
+    if reasoning_profile not in ("brief", "extended"):
+        raise ValueError("Unknown companion reasoning profile")
+    extended = reasoning_profile == "extended"
+    minimum, maximum = (120, 600) if extended else (1, 120)
+    if extended and (profile == "dialogue" or any(message["role"] == "user" for message in messages)):
+        raise ValueError("Extended reasoning requires a system-only self-thinking trajectory")
     for message in messages:
         if not message.get("loss_weight"):
             continue
         thought = message.get("reasoning_content", "").strip()
         han = len(HAN.findall(thought))
         english = len(ENGLISH.findall(thought))
-        if not 0 < len(thought) <= 120 or han < 4 or han / (han + english) < 0.65:
-            raise ValueError("Use a short, predominantly Chinese decision rationale")
+        if not minimum <= len(thought) <= maximum or han < (75 if extended else 4) or han / (han + english) < 0.65:
+            raise ValueError(f"Use a predominantly Chinese decision rationale of {minimum} to {maximum} characters")
         if profile == "dialogue" and not message.get("tool_calls"):
             text = message["content"]
             markers = list(ACT.finditer(text))
@@ -105,6 +112,8 @@ def check_companion_spec(spec):
                     or not isinstance(final["thought"], str) or not isinstance(final["text"], str)
                     or type(final["speak"]) is not bool or bool(final["text"].strip()) != final["speak"]):
                 raise ValueError("Invalid AIRI initiative decision")
+            if extended and not 0 < len(final["thought"].strip()) <= 120:
+                raise ValueError("Keep the initiative decision summary brief")
             engagement = host["engagement"]
             if final["speak"] and (engagement.get("canSpeak") is False or
                                    final["text"].strip() == str(engagement.get("lastInitiativeText", "")).strip()):

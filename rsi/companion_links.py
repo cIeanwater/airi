@@ -20,6 +20,14 @@ def _check_document_link(previous, current, document):
         raise ValueError("Follow-up prompt lacks the applied document")
 
 
+def _check_extraction_link(previous, current, extraction):
+    if (previous["refinement"].get("lane") != "extract" or current["refinement"].get("lane") != "organize"
+            or not isinstance(extraction, str) or not extraction.strip() or extraction.strip() == "NO_UPDATE"
+            or previous["messages"][-1]["content"] != extraction
+            or _host_state(current["messages"]).get("extractedUnderstanding") != extraction):
+        raise ValueError("Organizer input differs from the preceding extraction")
+
+
 def _check_delivery(current, decision, delivery):
     state = delivery["state"]
     if state not in {"delivered", "not_sent", "suppressed"}:
@@ -59,12 +67,17 @@ def check_companion_links(specs):
         ref = spec["refinement"]
         parent = ref.get("downstream_of")
         if parent is None:
+            if "extraction_source" in ref:
+                raise ValueError("An extraction link requires a parent")
             ancestors.add(spec["id"])
             continue
         try:
             if parent not in ancestors or by_id[parent]["group"] != spec["group"]:
                 raise ValueError("Parent must appear first in the same timeline group")
             previous = by_id[parent]
+            if "extraction_source" in ref:
+                _check_extraction_link(previous, spec, ref["extraction_source"])
+                checked["used_extractions"] = checked.get("used_extractions", 0) + 1
             if "consumed_document" in ref:
                 _check_document_link(previous, spec, ref["consumed_document"])
                 checked["applied_documents"] += 1

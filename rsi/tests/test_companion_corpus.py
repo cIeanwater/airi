@@ -50,6 +50,25 @@ class CompanionCorpusTests(unittest.TestCase):
             with self.subTest(props=props), self.assertRaisesRegex(ValueError, error):
                 check(props)
 
+    def test_extended_reasoning_is_limited_to_system_only_self_thinking(self):
+        decision = json.dumps({"thought": "等待对方。", "speak": False, "text": ""}, ensure_ascii=False)
+        row = specimen("initiative", decision, {"engagement": {"canSpeak": False}})
+        thought = "对方正在重新装纸轴。他此前说，等纸轴卡进槽再讨论。两次画面切换只能证明视角变了，我也没有收到他完成的消息。"
+        thought += "如果这时主动问有没有弄好，他还要停下手里的动作回答。频繁问也会让他以为我能看见夹子的位置。我先等他报告完成，再围绕他提到的卡槽问一句。"
+        thought += "如果后来只看到纸轴移动，我会继续等待对方的原话。"
+        row["messages"][-1]["reasoning_content"] = thought
+        with self.assertRaisesRegex(ValueError, "1 to 120 characters"):
+            check_companion_spec(row)
+        row["refinement"]["reasoning_profile"] = "extended"
+        check_companion_spec(row)
+        row["messages"].insert(1, {"role": "user", "content": "你好。", "loss_weight": 0})
+        with self.assertRaisesRegex(ValueError, "system-only"):
+            check_companion_spec(row)
+        row["messages"].pop(1)
+        row["messages"][-1]["reasoning_content"] = "等待对方。"
+        with self.assertRaisesRegex(ValueError, "120 to 600 characters"):
+            check_companion_spec(row)
+
 
 if __name__ == "__main__":
     unittest.main()
