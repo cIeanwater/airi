@@ -93,6 +93,13 @@ def sentence_count(text):
     return sum(bool(part.strip()) for part in re.split(r"[。！？!?\n]+|(?<!\d)\.(?=\s|$)", text))
 
 
+def reply_chinese_ratio(visible, expected):
+    text = re.sub(URL_TEXT, "", visible)
+    for literal in expected.get("verbatim_fields", []):
+        text = text.replace(literal, "")
+    return chinese_ratio(text)
+
+
 def document_checks(output, expected):
     """Evaluate consolidation writes against frozen source and revision expectations."""
     docs = output.get("documents") if isinstance(output, dict) and set(output) == {"documents"} else None
@@ -160,7 +167,7 @@ def score(case, prediction):
         or any(re.search(pattern, normalized, re.I) for pattern in expected.get("none_regex", []))
     )
     if case["suite"] in {"dialog", "tool"} or (case["suite"] == "initiative" and expected["speak"]):
-        checks["chinese_reply"] = chinese_ratio(re.sub(URL_TEXT, "", visible)) >= 0.7
+        checks["chinese_reply"] = reply_chinese_ratio(visible, expected) >= 0.7
         checks["required_facts"] = all(any(normalized_text(value) in normalized for value in options)
                                        for options in expected.get("groups", []))
         checks["concise_reply"] = 0 < len(visible.strip()) <= expected.get("max_chars", 120)
