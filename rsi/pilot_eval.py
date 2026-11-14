@@ -258,6 +258,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(config["tokenizer"], local_files_only=True, trust_remote_code=False)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    markers = tokenizer.convert_tokens_to_ids([TURN_STOP, EOS, TOOL_STOP])
+    if len(set(markers)) != 3 or tokenizer.unk_token_id in markers:
+        raise ValueError("Tokenizer lacks Gemma 4 native stop tokens")
     token_root = Path(config["tokenizer"])
     token_files = {name: file_hash(token_root / name) for name in lineage["tokenizer_files"]}
     token_identity = {"files": token_files, "chat_template_sha256": digest(str(tokenizer.chat_template))}
@@ -284,7 +287,13 @@ def main():
         "quantization": "nf4-double" if config["method"] == "qlora" else None,
         "precision": config["precision"], "gpu": torch.cuda.get_device_name(config["device"]),
         "max_new_tokens_per_generation": args.max_new_tokens, "packages": _versions(),
+        "enable_thinking": True,
+        "generation": {"do_sample": False, "use_cache": True, "seed": config["seed"], "eos_token_ids": markers},
         "summary": {name: summarize(rows) for name, rows in results.items()},
+        "identical_generated_cases": sum(
+            left["generations"] == right["generations"]
+            for left, right in zip(results["baseline"], results["adapter"], strict=True)
+        ),
         "observations": results,
     }
     write_json(args.output, report)
