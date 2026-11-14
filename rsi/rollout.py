@@ -12,6 +12,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 from .cleaning import _hard_checks
 from .common import digest, file_hash, read_json, read_jsonl, write_json, write_jsonl
+from .companion_corpus import check_companion_spec
 from .finetune import CHAT_SFT_KIND, inspect_dataset
 from .replay import ReplaySession
 from .trajectory import build_trajectory, capture_request, compile_trajectory, replay_receipt
@@ -94,7 +95,7 @@ def _native_target_size(sequence, tokenizer):
     return len(labels) - first
 
 
-def assemble(specs, tokenizer, max_length, output, *, verify_native=False):
+def assemble(specs, tokenizer, max_length, output, *, verify_native=False, companion=False):
     out = Path(output)
     if not specs:
         raise ValueError("Supply at least one refined trajectory")
@@ -107,6 +108,11 @@ def assemble(specs, tokenizer, max_length, output, *, verify_native=False):
         identities.add(spec["id"])
         row = build_trajectory(spec["messages"], spec["tools"], evidence=spec["evidence"],
                                template_kwargs=spec.get("template_kwargs"))
+        if companion:
+            try:
+                check_companion_spec({**spec, "messages": row["messages"]})
+            except ValueError as error:
+                raise ValueError(spec["id"] + ": " + str(error)) from error
         if spec["kind"] == "initiative":
             _hard_checks(row["messages"], "initiative", spec.get("policy", {}))
         encoded = compile_trajectory(row, tokenizer, max_length)
@@ -178,9 +184,11 @@ def _local_tokenizer(path):
 
 
 def _compile_shard(task):
-    source, out, tokenizer_path, tokenizer_sha, max_length = task
+    source, out, tokenizer_path, tokenizer_sha, max_length, companion = task
     receipt = out / "compile-receipt.json"
     inputs = {"spec_sha256": file_hash(source), "tokenizer_sha256": tokenizer_sha, "max_length": max_length}
+    if companion:
+        inputs["profile"] = "airi-companion"
     if receipt.is_file():
         previous = read_json(receipt)
         if previous["inputs"] != inputs or previous["manifest_sha256"] != file_hash(out / "manifest.json"):
@@ -193,7 +201,7 @@ def _compile_shard(task):
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out.parent, prefix=".compile-") as temporary:
         stage = Path(temporary) / out.name
-        report = assemble(specs, tokenizer, max_length, stage, verify_native=True)
+        report = assemble(specs, tokenizer, max_length, stage, verify_native=True, companion=companion)
         if file_hash(source) != inputs["spec_sha256"]:
             raise ValueError("Shard input changed during compilation: " + str(source))
         targets = [target for row in report["trajectories"] for target in row["targets"]]
@@ -208,7 +216,7 @@ def _compile_shard(task):
     return result
 
 
-def assemble_shards(inputs, tokenizer, max_length, output, workers):
+def assemble_shards(inputs, tokenizer, max_length, output, workers, *, companion=False):
     """Compile numbered source files in parallel and retain independent receipts."""
     sources = sorted(Path(inputs).glob("spec-*.jsonl"))
     if not sources or workers < 1:
@@ -219,7 +227,7 @@ def assemble_shards(inputs, tokenizer, max_length, output, workers):
     token_files = {name: file_hash(token_root / name) for name in names if (token_root / name).is_file()}
     if not token_files:
         raise ValueError("Expected local tokenizer files")
-    tasks = [(source, root / source.stem, token_root, digest(token_files), max_length) for source in sources]
+    tasks = [(source, root / source.stem, token_root, digest(token_files), max_length, companion) for source in sources]
     with ProcessPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(_compile_shard, tasks))
     seen_ids, seen_rows = set(), set()
@@ -251,6 +259,7 @@ def main():
     for option in ("input", "tokenizer", "output"):
         build.add_argument("--" + option, required=True)
     build.add_argument("--max-length", type=int, required=True)
+    build.add_argument("--companion", action="store_true")
     verify = commands.add_parser("audit")
     for option in ("dataset", "tokenizer", "output"):
         verify.add_argument("--" + option, required=True)
@@ -260,6 +269,7 @@ def main():
         batch.add_argument("--" + option, required=True)
     batch.add_argument("--max-length", type=int, required=True)
     batch.add_argument("--workers", type=int, default=2)
+    batch.add_argument("--companion", action="store_true")
     args = parser.parse_args()
     if args.command == "capture":
         output = Path(args.output)
@@ -272,7 +282,8 @@ def main():
         run = rollout(read_json(args.seed), args.endpoint, args.model, args.output, max_tokens=args.max_tokens)
         print(json.dumps({"status": run["status"], "model": run["model"], "responses": len(run["responses"])}))
     elif args.command == "assemble-shards":
-        report = assemble_shards(args.input, args.tokenizer, args.max_length, args.output, args.workers)
+        report = assemble_shards(args.input, args.tokenizer, args.max_length, args.output, args.workers,
+                                 companion=args.companion)
         print(json.dumps(report["totals"]))
     else:
         from transformers import AutoTokenizer
@@ -282,7 +293,7 @@ def main():
             report = audit(args.dataset, tokenizer, args.max_length)
             write_json(args.output, report)
         else:
-            report = assemble(read_json(args.input), tokenizer, args.max_length, args.output)
+            report = assemble(read_json(args.input), tokenizer, args.max_length, args.output, companion=args.companion)
         print(json.dumps(report))
 
 
