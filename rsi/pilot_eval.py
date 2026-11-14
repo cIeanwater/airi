@@ -64,16 +64,21 @@ def normalized_text(text):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).casefold()
 
 
-def reflection_decision(visible):
-    """Check the reflection fields after unwrapping the AIRI output envelope."""
+def reflection_json(visible):
+    """Read a JSON object after unwrapping the AIRI output envelope."""
     body = TERMINAL_ACT.sub("", visible.strip()).strip()
     envelope = JSON_ENVELOPE.fullmatch(body)
     if envelope:
         body = envelope[1]
     try:
-        decision = json.loads(body, object_pairs_hook=unique_keys)
+        return json.loads(body, object_pairs_hook=unique_keys)
     except ValueError:
         return None
+
+
+def reflection_decision(visible):
+    """Check the initiative fields accepted by AIRI."""
+    decision = reflection_json(visible)
     if (isinstance(decision, dict) and set(decision) == {"thought", "speak", "text"}
             and isinstance(decision["thought"], str) and len(decision["thought"]) <= 4000
             and isinstance(decision["text"], str) and len(decision["text"]) <= 1000
@@ -86,6 +91,36 @@ def sentence_count(text):
     """Count Chinese sentence endings and explicit separate answer lines."""
     text = re.sub(URL_TEXT, "URL", text)
     return sum(bool(part.strip()) for part in re.split(r"[。！？!?\n]+|(?<!\d)\.(?=\s|$)", text))
+
+
+def document_checks(output, expected):
+    """Evaluate consolidation writes against frozen source and revision expectations."""
+    docs = output.get("documents") if isinstance(output, dict) and set(output) == {"documents"} else None
+    fields = {"path", "text", "nature", "sources", "expectedRevision"}
+    shape = isinstance(docs, list) and len(docs) <= 4 and all(
+        isinstance(doc, dict) and set(doc) == fields and isinstance(doc["path"], str)
+        and isinstance(doc["text"], str) and 0 < len(doc["text"].strip()) <= 12000
+        and doc["nature"] in ("reported", "observed", "inferred", "feeling") and isinstance(doc["sources"], list)
+        and all(isinstance(source, str) for source in doc["sources"])
+        and type(doc["expectedRevision"]) is int and doc["expectedRevision"] >= 0 for doc in docs
+    )
+    updates = expected["documents"]
+    by_path = {doc["path"]: doc for doc in docs} if shape else {}
+    count = shape and len(docs) == len(by_path) == len(updates)
+    same_paths = count and set(by_path) == {doc["path"] for doc in updates}
+    bindings = bool(same_paths and all(
+        by_path[item["path"]]["expectedRevision"] == item["expectedRevision"]
+        and by_path[item["path"]]["nature"] == item["nature"]
+        and sorted(by_path[item["path"]]["sources"]) == sorted(item["sources"]) for item in updates
+    ))
+    content = bool(same_paths and all(
+        all(any(normalized_text(value) in normalized_text(by_path[item["path"]]["text"]) for value in options)
+            for options in item.get("groups", []))
+        and not any(re.search(pattern, normalized_text(by_path[item["path"]]["text"])) for pattern in item.get("none_regex", []))
+        for item in updates
+    ))
+    return {"airi_consolidation_fields": bool(shape), "consolidation_paths": bool(same_paths),
+            "consolidation_source_and_revision": bindings, "consolidation_text_grounded": content}
 
 
 def score(case, prediction):
@@ -102,7 +137,11 @@ def score(case, prediction):
     else:
         checks["no_tool_call"] = not prediction["calls"]
     strict_json = None
-    if case["suite"] == "initiative":
+    if case["suite"] == "reflection":
+        parsed = reflection_json(visible)
+        checks.update(document_checks(parsed, expected))
+        strict_json = checks["airi_consolidation_fields"] and visible.lstrip().startswith("{") and visible.rstrip().endswith("}")
+    elif case["suite"] == "initiative":
         decision = reflection_decision(visible)
         shape = decision is not None
         strict_json = shape and visible.lstrip().startswith("{") and visible.rstrip().endswith("}")
@@ -120,7 +159,7 @@ def score(case, prediction):
         any(normalized_text(value) in normalized for value in expected.get("none", []))
         or any(re.search(pattern, normalized, re.I) for pattern in expected.get("none_regex", []))
     )
-    if case["suite"] != "initiative" or expected["speak"]:
+    if case["suite"] in {"dialog", "tool"} or (case["suite"] == "initiative" and expected["speak"]):
         checks["chinese_reply"] = chinese_ratio(re.sub(URL_TEXT, "", visible)) >= 0.7
         checks["required_facts"] = all(any(normalized_text(value) in normalized for value in options)
                                        for options in expected.get("groups", []))
@@ -245,8 +284,8 @@ def verify_suite(cases, dataset):
         raise ValueError("Use distinct evaluation case IDs")
     for case in cases:
         roles = [message["role"] for message in case["messages"]]
-        system_only = case["suite"] == "initiative" and roles == ["system"]
-        if case["suite"] not in ("dialog", "tool", "initiative") or not roles or (roles[-1] != "user" and not system_only):
+        system_only = case["suite"] in ("initiative", "reflection") and roles == ["system"]
+        if case["suite"] not in ("dialog", "tool", "initiative", "reflection") or not roles or (roles[-1] != "user" and not system_only):
             raise ValueError("Invalid case kind or missing final input")
         ReplaySession(case)
     report = {"fixture_sha256": digest(cases), "cases": len(cases), "split_overlap_check": None}
@@ -303,7 +342,8 @@ def summarize(results):
         "by_suite": {
             name: {"passed": sum(row["passed"] for row in results if row["suite"] == name),
                    "total": sum(row["suite"] == name for row in results)}
-            for name in ("dialog", "tool", "initiative")
+            for name in ("dialog", "tool", "initiative", "reflection")
+            if name != "reflection" or any(row["suite"] == name for row in results)
         },
     }
 

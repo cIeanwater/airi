@@ -1,7 +1,7 @@
 import unittest
 
 from rsi.common import digest
-from rsi.pilot_eval import reflection_decision, run_case, run_suite, summarize, verify_suite
+from rsi.pilot_eval import document_checks, reflection_decision, run_case, run_suite, summarize, verify_suite
 
 
 def answer(text):
@@ -73,6 +73,16 @@ class PilotEvalTests(unittest.TestCase):
         self.assertEqual(verify_suite([case], None)["cases"], 1)
         with self.assertRaisesRegex(ValueError, "Invalid case kind or missing final input"):
             verify_suite([{**case, "suite": "dialog"}], None)
+
+    def test_consolidation_rejects_wrong_source_and_revision(self):
+        current = {"path": "人物/甲.md", "text": "对方常用蓝夹。", "nature": "reported", "sources": ["user-evidence"],
+                   "expectedRevision": 3}
+        expected = {"documents": [{**current, "groups": [["对方"], ["蓝夹"]]}]}
+        self.assertTrue(all(document_checks({"documents": [current]}, expected).values()))
+        for invalid in ({**current, "sources": ["other-scope"]}, {**current, "expectedRevision": 4}):
+            self.assertFalse(document_checks({"documents": [invalid]}, expected)["consolidation_source_and_revision"])
+        self.assertFalse(document_checks({"documents": [current, current]}, expected)["consolidation_paths"])
+        self.assertFalse(document_checks({"documents": [current]}, {"documents": []})["consolidation_paths"])
 
 
 if __name__ == "__main__":
