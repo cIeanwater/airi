@@ -189,6 +189,36 @@ def budget_reviews(dataset, reviews_path, token_report, output):
             "truncated": 0, "source_manifest_sha256": inspected["manifest_sha256"], "token_report_sha256": file_hash(token_report)}
 
 
+def export_chat(dataset, output):
+    from .finetune import CHAT_SFT_KIND, inspect_dataset
+
+    out = Path(output)
+    splits, inspected = inspect_dataset(dataset)
+    source = read_json(Path(dataset) / "manifest.json")
+    manifest = {"schema_version": 1, "kind": CHAT_SFT_KIND, "scope": inspected["scope"],
+                "source_manifest_sha256": inspected["manifest_sha256"], "files": {}, "records": []}
+    if "readiness" in source:
+        manifest["readiness"] = source["readiness"]
+    out.mkdir(parents=True, exist_ok=False)
+    for split, rows in splits.items():
+        samples = []
+        for row in rows:
+            selected = set(row["train_indices"])
+            sample = {"messages": [{**message, "loss_weight": int(index in selected)}
+                                   for index, message in enumerate(row["messages"])]}
+            for key in ("tools", "template_kwargs"):
+                if row.get(key):
+                    sample[key] = row[key]
+            samples.append(sample)
+            manifest["records"].append({"split": split, "content_sha256": digest(sample),
+                                        **{key: row[key] for key in ("id", "group", "kind", "source_ids")}})
+        path = out / (split + ".jsonl")
+        write_jsonl(path, samples)
+        manifest["files"][split] = file_hash(path)
+    write_json(out / "manifest.json", manifest)
+    return {"rows": inspected["rows"], "manifest_sha256": digest(manifest)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -210,6 +240,9 @@ def main():
     sub = commands.add_parser("budget-reviews")
     for name in ("dataset", "reviews", "token-report", "output"):
         sub.add_argument("--" + name, required=True)
+    sub = commands.add_parser("export-chat")
+    sub.add_argument("--dataset", required=True)
+    sub.add_argument("--output", required=True)
     sub = commands.add_parser("finalize")
     for name in ("candidates", "reviews", "output"):
         sub.add_argument("--" + name, required=True)
@@ -228,6 +261,8 @@ def main():
         result = collect_reviews(args.candidates, args.reviews, args.output)
     elif args.command == "budget-reviews":
         result = budget_reviews(args.dataset, args.reviews, args.token_report, args.output)
+    elif args.command == "export-chat":
+        result = export_chat(args.dataset, args.output)
     else:
         from .cleaning import finalize
         result = finalize(args.candidates, args.reviews, args.output, min_groups=args.min_groups)

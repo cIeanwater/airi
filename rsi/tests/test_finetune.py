@@ -10,7 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rsi.common import file_hash, read_json, write_json, write_jsonl
+from rsi.common import file_hash, read_json, read_jsonl, write_json, write_jsonl
+from rsi.curate import export_chat
 from rsi.finetune import _weight_manifest, check, configuration, environment_check, inspect_dataset, merge, row_hash, tokenize, train, validate_row
 
 
@@ -81,6 +82,33 @@ class FinetuneTests(unittest.TestCase):
         _, report = inspect_dataset(self.dataset(), 3)
         self.assertTrue(report["ready"])
         self.assertEqual(report["independent_groups"], 3)
+
+    def test_chat_export_preserves_native_tokens_and_loss_labels(self):
+        train_row = self.rows["train"][0]
+        train_row["messages"][-1]["reasoning_content"] = "简短理由。"
+        train_row["template_kwargs"] = {"enable_thinking": True}
+        directory = self.dataset()
+        output = self.root / "chat"
+        export_chat(directory, output)
+        [sample] = read_jsonl(output / "train.jsonl")
+        self.assertEqual(set(sample), {"messages", "template_kwargs"})
+        self.assertEqual([m["loss_weight"] for m in sample["messages"]], [0, 0, 1])
+        original_tokens, _ = tokenize(directory, self.config, NativeTokenizer())
+        compact_tokens, report = tokenize(output, self.config, NativeTokenizer())
+        self.assertEqual(compact_tokens, original_tokens)
+        self.assertTrue(report["ready_for_training"])
+
+    def test_chat_export_rejects_row_reordering_after_file_hash_update(self):
+        self.rows["train"].append(cleaned_row(3))
+        output = self.root / "chat"
+        export_chat(self.dataset(), output)
+        path = output / "train.jsonl"
+        write_jsonl(path, reversed(read_jsonl(path)))
+        manifest = read_json(output / "manifest.json")
+        manifest["files"]["train"] = file_hash(path)
+        write_json(output / "manifest.json", manifest)
+        with self.assertRaisesRegex(ValueError, "Chat row hash changed"):
+            inspect_dataset(output, 3)
 
     def test_changed_file_is_rejected_before_training(self):
         directory = self.dataset()

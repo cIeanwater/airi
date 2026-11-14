@@ -83,6 +83,17 @@ python -m rsi.curate finalize --candidates rsi/private/corpus-001/extracted/cand
 ```
 
 Use that new dataset for another tokenizer check and training.
+Export the final dataset as compact chat JSONL for local LoRA:
+
+```powershell
+python -m rsi.curate export-chat --dataset rsi/private/corpus-001/dataset-budget --output rsi/private/corpus-001/train-chat
+```
+
+Use `train-chat` as the dataset directory in `train-local.ps1`.
+Each message has `role`, `content`, and `loss_weight`. Weight 1 selects an assistant target. Weight 0 masks its loss.
+Gemma thinking and tool messages keep the fields required by the native template.
+The manifest holds source IDs, split groups, and row hashes.
+
 Training checks dataset hashes, scopes, independent splits, dependencies, and a CUDA kernel before model load.
 It records adapter lineage, optimizer checkpoints, validation loss, and held-out test loss.
 Merge checks the original base, scope, and tokenizer. It loads a full-precision CPU base and saves a separate candidate.

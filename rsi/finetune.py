@@ -22,6 +22,7 @@ DEFAULTS = {
     "max_steps": 0, "gradient_accumulation": 16, "seed": 42,
     "save_steps": 20, "minimum_groups": 10, "target_modules": ["q_proj", "v_proj"],
 }
+CHAT_SFT_KIND = "chat-sft"
 
 
 def configuration(value):
@@ -146,6 +147,31 @@ def validate_row(row):
     return row
 
 
+def _restore_chat_rows(rows, records, scope):
+    if len(rows) != len(records):
+        raise ValueError("Chat rows do not match the manifest")
+    restored = []
+    for row, record in zip(rows, records):
+        if not isinstance(row, dict) or set(row) - {"messages", "tools", "template_kwargs"}:
+            raise ValueError("Chat rows require messages and optional template inputs")
+        if record.get("content_sha256") != digest(row):
+            raise ValueError("Chat row hash changed")
+        if not isinstance(row.get("messages"), list):
+            raise ValueError("Chat rows require a message array")
+        messages, indices = [], []
+        for index, message in enumerate(row["messages"]):
+            if not isinstance(message, dict) or type(message.get("loss_weight")) is not int or message["loss_weight"] not in (0, 1):
+                raise ValueError("Message loss weight must be 0 or 1")
+            if message["loss_weight"] == 1:
+                indices.append(index)
+            messages.append({key: value for key, value in message.items() if key != "loss_weight"})
+        sample = {**row, "messages": messages, "train_indices": indices, "scope": scope,
+                  **{key: record.get(key) for key in ("id", "group", "source_ids", "kind")}}
+        sample["content_sha256"] = row_hash(sample)
+        restored.append(sample)
+    return restored
+
+
 def inspect_dataset(directory, minimum_groups=10):
     root = Path(directory)
     manifest = read_json(root / "manifest.json")
@@ -153,11 +179,21 @@ def inspect_dataset(directory, minimum_groups=10):
     counts = {}
     if not isinstance(manifest.get("files"), dict) or set(manifest["files"]) != {"train", "validation", "test"}:
         raise ValueError("Manifest must bind train, validation, and test JSONL files")
+    compact = manifest.get("kind") == CHAT_SFT_KIND
+    records = manifest.get("records")
+    if records is not None or compact:
+        if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
+            raise ValueError("Manifest record bindings must be an array of objects")
+    if compact and (manifest.get("schema_version") != 1 or any(r.get("split") not in manifest["files"] for r in records)):
+        raise ValueError("Invalid chat dataset manifest")
     for split in ("train", "validation", "test"):
         path = root / (split + ".jsonl")
         if not path.is_file() or file_hash(path) != manifest["files"][split]:
             raise ValueError("Dataset file is missing or changed: " + split)
         splits[split] = read_jsonl(path)
+        if compact:
+            split_records = [r for r in records if r["split"] == split]
+            splits[split] = _restore_chat_rows(splits[split], split_records, manifest.get("scope"))
         counts[split] = len(splits[split])
         if not splits[split]:
             errors.append("empty_split:" + split)
@@ -187,11 +223,8 @@ def inspect_dataset(directory, minimum_groups=10):
             raise ValueError("Manifest readiness requires an explicit Boolean gate")
         if readiness["ready"] is not True:
             errors.append("source_cleaning_readiness_blocked")
-    if manifest.get("records") is not None:
-        records = manifest["records"]
+    if records is not None and not compact:
         expected = {(row["id"], split, row["content_sha256"]) for split, values in splits.items() for row in values}
-        if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
-            raise ValueError("Manifest record bindings must be an array of objects")
         supplied = {(row.get("id"), row.get("split"), row.get("content_sha256")) for row in records}
         if supplied != expected or len(records) != len(expected):
             raise ValueError("Manifest record bindings do not match the cleaned dataset")
