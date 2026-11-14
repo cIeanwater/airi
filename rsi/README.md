@@ -101,7 +101,42 @@ It does not merge into quantized inference weights or replace the active server.
 Loss changes alone do not establish persona quality, tool reliability, or promotion eligibility.
 The `cycle` workflow below uses normalized episodes and independent evidence for automatic release decisions.
 The local runner uses one visible GPU at logical device zero. Select another physical GPU with `CUDA_VISIBLE_DEVICES`.
-Capture earlier tool decisions as normalized episodes with per-decision evidence. Corpus extraction selects each request's final assistant target.
+The archive filter selects each request's final answer. Use the multi-turn workflow to supervise earlier assistant steps.
+
+## Build multi-turn trajectories
+
+A trajectory uses one JSONL row for the full conversation. Set loss weights for each assistant decision.
+Tool results stay in context. Their IDs bind them to the matching calls.
+Each selected decision compiles with its causal prefix through the native template.
+
+From a local capture, select the final completed request with the earlier calls and results in its input.
+Capture it with this command.
+
+```powershell
+python -m rsi.rollout capture --input REQUEST.json --source-id REQUEST_ID --output CAPTURE.json
+```
+
+For an external replay, use a seed with `system`, `user_turns`, `tools`, and `source_id`.
+Set `environment.tool_replay` to ordered entries with `name`, `arguments`, `status`, and `result`.
+Set `environment_sha256` to the canonical digest of the environment.
+Choose training rows with complete responses and tool records.
+
+```powershell
+python -m rsi.rollout replay --seed SEED.json --endpoint http://127.0.0.1:18088/v1 --model gemma4-e2b-int4 --output ROLLOUT.json
+```
+
+Use `prompts/refine-trajectory.txt` to review and revise the input and assistant turns.
+Keep the original tool evidence from capture or replay. A changed argument needs a new bound receipt.
+Create an array of refined records with `id`, `group`, `kind`, `scope`, `source_ids`, `messages`, `tools`, `evidence`, and `refinement`.
+Use `template_kwargs` to specify native thinking options.
+
+```powershell
+python -m rsi.rollout assemble --input REFINED.json --tokenizer TOKENIZER_DIR --max-length 8192 --output DATASET_DIR
+```
+
+Assembly checks all assistant targets. It writes compact chat JSONL, a provenance file, and a length report.
+The pilot export is for review. Use an independent holdout before training with the local runner.
+The example training config starts at 8192 tokens. Choose a context budget with a measured GPU batch.
 
 ## Start with the synthetic walkthrough
 

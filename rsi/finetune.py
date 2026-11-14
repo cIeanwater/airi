@@ -18,7 +18,7 @@ from .dataset import compile_messages
 
 DEFAULTS = {
     "method": "qlora", "precision": "bf16", "device": 0, "rank": 8,
-    "max_length": 2048, "learning_rate": 0.00005, "epochs": 1,
+    "max_length": 8192, "learning_rate": 0.00005, "epochs": 1,
     "max_steps": 0, "gradient_accumulation": 16, "seed": 42,
     "save_steps": 20, "minimum_groups": 10, "target_modules": ["q_proj", "v_proj"],
 }
