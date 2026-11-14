@@ -40,6 +40,15 @@ class PilotEvalTests(unittest.TestCase):
         self.assertIsNone(reflection_decision(body.replace('false', '"false"')))
         self.assertIsNone(reflection_decision(body.replace('false', 'false,"speak":true')))
 
+    def test_dialogue_scores_spoken_text_with_inline_airi_actions(self):
+        case = {"id": "actions", "suite": "dialog", "messages": [{"role": "user", "content": "在吗？"}],
+                "expect": {"groups": [["在呢"]], "max_chars": 5, "none": ["happy", "emotion"]}}
+        output = '<|ACT {"emotion":"neutral"}|>在呢<|ACT {"emotion":"happy"}|>。'
+        result = run_case(case, lambda *_: answer(output))
+        self.assertTrue(result["passed"])
+        malformed = output.replace('"happy"', 'happy')
+        self.assertFalse(run_case(case, lambda *_: answer(malformed))["complete"])
+
     def test_batch_keeps_single_reply_and_pending_tool_loop_paired(self):
         environment = {"tool_replay": [{"name": "memory", "arguments": {"query": "卡片"}, "status": "finished", "result": "在抽屉。"}]}
         tool_case = {"id": "tool", "suite": "tool", "messages": [{"role": "user", "content": "查卡片位置。"}],

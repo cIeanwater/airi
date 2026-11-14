@@ -24,7 +24,19 @@ LETTERS = r"[A-Za-z\u3400-\u9fff]"
 URL_TEXT = r"https?://[^\s)\]。，！？；]+"
 THOUGHT_BUDGET = 120
 JSON_ENVELOPE = re.compile(r"^```(?:json)?[ \t]*\r?\n([\s\S]*)\n```$", re.I)
-TERMINAL_ACT = re.compile(r"\s*<\|ACT\s[\s\S]*?\|>\s*$")
+ACT_MARKER = re.compile(r"<\|ACT\s+(\{[^\r\n]*?\})\|>")
+TERMINAL_ACT = re.compile(r"\s*<\|ACT\s+\{[^\r\n]*?\}\|>\s*$")
+
+
+def without_act(text):
+    def remove_valid_marker(match):
+        try:
+            action = json.loads(match[1])
+        except ValueError:
+            return match[0]
+        return "" if isinstance(action, dict) else match[0]
+
+    return ACT_MARKER.sub(remove_valid_marker, text).strip()
 
 
 def split_completion(raw, *, starts_in_thought=False):
@@ -40,7 +52,7 @@ def split_completion(raw, *, starts_in_thought=False):
         text = text[:-len(stop_token)]
     calls = parse_calls(text)
     text = re.sub(r"<\|tool_call>.*?<tool_call\|>", "", text, flags=re.S).strip()
-    if re.search(r"<\|[^>]*>|<[^<]*\|>", TERMINAL_ACT.sub("", text)):
+    if re.search(r"<\|[^>]*>|<[^<]*\|>", without_act(text)):
         raise ValueError("Unexpected native markup in visible output")
     if calls and (not stop_token or text):
         raise ValueError("Native tool turn did not end at the tool-response boundary")
@@ -134,6 +146,8 @@ def score(case, prediction):
     expected = case["expect"]
     budget = expected.get("thought_max_chars", THOUGHT_BUDGET)
     visible = prediction["text"]
+    if case["suite"] in {"dialog", "tool"}:
+        visible = without_act(visible)
     checks = {"complete": prediction["complete"]}
     reasoning = prediction["native_thoughts"]
     steps = case.get("environment", {}).get("tool_replay", [])
