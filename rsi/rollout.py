@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import tempfile
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
@@ -189,15 +190,21 @@ def _compile_shard(task):
 
     tokenizer = _local_tokenizer(tokenizer_path)
     specs = read_jsonl(source)
-    report = assemble(specs, tokenizer, max_length, out, verify_native=True)
-    targets = [target for row in report["trajectories"] for target in row["targets"]]
-    result = {"inputs": inputs, "manifest_sha256": file_hash(out / "manifest.json"), "rows": len(specs),
-              "kinds": dict(Counter(row["kind"] for row in specs)),
-              "assistant_only_rows": sum(not row["user_turns"] for row in report["trajectories"]),
-              "target_sequences": len(targets), "target_tokens": sum(item["loss_tokens"] for item in targets),
-              "longest_sequence": max(item["tokens"] for item in targets),
-              "tool_receipts": sum(row["receipts"] for row in report["trajectories"])}
-    write_json(receipt, result)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=out.parent, prefix=".compile-") as temporary:
+        stage = Path(temporary) / out.name
+        report = assemble(specs, tokenizer, max_length, stage, verify_native=True)
+        if file_hash(source) != inputs["spec_sha256"]:
+            raise ValueError("Shard input changed during compilation: " + str(source))
+        targets = [target for row in report["trajectories"] for target in row["targets"]]
+        result = {"inputs": inputs, "manifest_sha256": file_hash(stage / "manifest.json"), "rows": len(specs),
+                  "kinds": dict(Counter(row["kind"] for row in specs)),
+                  "assistant_only_rows": sum(not row["user_turns"] for row in report["trajectories"]),
+                  "target_sequences": len(targets), "target_tokens": sum(item["loss_tokens"] for item in targets),
+                  "longest_sequence": max(item["tokens"] for item in targets),
+                  "tool_receipts": sum(row["receipts"] for row in report["trajectories"])}
+        write_json(stage / receipt.name, result)
+        stage.rename(out)
     return result
 
 
