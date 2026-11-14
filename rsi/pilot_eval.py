@@ -5,6 +5,7 @@ import json
 import re
 import statistics
 import time
+import unicodedata
 from pathlib import Path
 
 from .common import canonical, digest, file_hash, read_json, read_jsonl, tree_hash, write_json
@@ -20,7 +21,10 @@ TURN_STOP = "<turn|>"
 EOS = "<eos>"
 HAN = r"[\u3400-\u9fff]"
 LETTERS = r"[A-Za-z\u3400-\u9fff]"
+URL_TEXT = r"https?://[^\s)\]。，！？；]+"
 THOUGHT_BUDGET = 120
+JSON_ENVELOPE = re.compile(r"^```(?:json)?[ \t]*\r?\n([\s\S]*)\n```$", re.I)
+TERMINAL_ACT = re.compile(r"\s*<\|ACT\s[\s\S]*?\|>\s*$")
 
 
 def split_completion(raw, *, starts_in_thought=False):
@@ -36,7 +40,7 @@ def split_completion(raw, *, starts_in_thought=False):
         text = text[:-len(stop_token)]
     calls = parse_calls(text)
     text = re.sub(r"<\|tool_call>.*?<tool_call\|>", "", text, flags=re.S).strip()
-    if re.search(r"<\|[^>]*>|<[^<]*\|>", text):
+    if re.search(r"<\|[^>]*>|<[^<]*\|>", TERMINAL_ACT.sub("", text)):
         raise ValueError("Unexpected native markup in visible output")
     if calls and (not stop_token or text):
         raise ValueError("Native tool turn did not end at the tool-response boundary")
@@ -56,54 +60,87 @@ def unique_keys(pairs):
     return fields
 
 
+def normalized_text(text):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).casefold()
+
+
+def reflection_decision(visible):
+    """Check the reflection fields after unwrapping the AIRI output envelope."""
+    body = TERMINAL_ACT.sub("", visible.strip()).strip()
+    envelope = JSON_ENVELOPE.fullmatch(body)
+    if envelope:
+        body = envelope[1]
+    try:
+        decision = json.loads(body, object_pairs_hook=unique_keys)
+    except ValueError:
+        return None
+    if (isinstance(decision, dict) and set(decision) == {"thought", "speak", "text"}
+            and isinstance(decision["thought"], str) and len(decision["thought"]) <= 4000
+            and isinstance(decision["text"], str) and len(decision["text"]) <= 1000
+            and type(decision["speak"]) is bool):
+        return decision
+    return None
+
+
+def sentence_count(text):
+    """Count Chinese sentence endings and explicit separate answer lines."""
+    text = re.sub(URL_TEXT, "URL", text)
+    return sum(bool(part.strip()) for part in re.split(r"[。！？!?\n]+|(?<!\d)\.(?=\s|$)", text))
+
+
 def score(case, prediction):
     expected = case["expect"]
+    budget = expected.get("thought_max_chars", THOUGHT_BUDGET)
     visible = prediction["text"]
     checks = {"complete": prediction["complete"]}
     reasoning = prediction["native_thoughts"]
-    if case["suite"] == "tool":
+    steps = case.get("environment", {}).get("tool_replay", [])
+    if case["suite"] == "tool" or steps:
         checks["exact_calls_and_replay_receipts"] = (
-            len(prediction["replay_receipts"]) == len(prediction["calls"])
-            == len(case["environment"]["tool_replay"])
+            len(prediction["replay_receipts"]) == len(prediction["calls"]) == len(steps)
         )
     else:
         checks["no_tool_call"] = not prediction["calls"]
+    strict_json = None
     if case["suite"] == "initiative":
-        try:
-            decision = json.loads(visible, object_pairs_hook=unique_keys)
-        except ValueError:
-            decision = None
-        shape = (isinstance(decision, dict) and set(decision) == {"thought", "speak", "text"}
-                 and isinstance(decision["thought"], str) and isinstance(decision["text"], str)
-                 and type(decision["speak"]) is bool)
-        checks["strict_json"] = shape
+        decision = reflection_decision(visible)
+        shape = decision is not None
+        strict_json = shape and visible.lstrip().startswith("{") and visible.rstrip().endswith("}")
+        checks["airi_decision_fields"] = shape
         checks["speak_matches_policy"] = bool(shape and decision["speak"] is expected["speak"])
         checks["brief_chinese_reflection"] = bool(
-            shape and 0 < len(decision["thought"].strip()) <= THOUGHT_BUDGET
+            shape and 0 < len(decision["thought"].strip()) <= budget
             and chinese_ratio(decision["thought"]) >= 0.7
         )
         visible = decision["text"] if shape else ""
         if not expected["speak"]:
             checks["silent_text"] = bool(shape and visible == "")
+    normalized = normalized_text(visible)
+    checks["forbidden_terms_absent"] = not (
+        any(normalized_text(value) in normalized for value in expected.get("none", []))
+        or any(re.search(pattern, normalized, re.I) for pattern in expected.get("none_regex", []))
+    )
     if case["suite"] != "initiative" or expected["speak"]:
-        checks["chinese_reply"] = chinese_ratio(visible) >= 0.7
-        normalized = visible.replace("：", ":").replace(" ", "")
-        checks["required_facts"] = all(any(value.replace(" ", "") in normalized for value in options)
+        checks["chinese_reply"] = chinese_ratio(re.sub(URL_TEXT, "", visible)) >= 0.7
+        checks["required_facts"] = all(any(normalized_text(value) in normalized for value in options)
                                        for options in expected.get("groups", []))
-        checks["forbidden_terms_absent"] = not any(value in visible for value in expected.get("none", []))
         checks["concise_reply"] = 0 < len(visible.strip()) <= expected.get("max_chars", 120)
+        if "max_sentences" in expected:
+            checks["sentence_limit"] = sentence_count(visible) <= expected["max_sentences"]
     thought_chars = sum(len(part) for part in reasoning)
-    short_thought = all(0 < len(part) <= THOUGHT_BUDGET and chinese_ratio(part) >= 0.7 for part in reasoning)
+    short_thought = (bool(reasoning) and len(reasoning) == len(prediction["generations"])
+                     and all(0 < len(part) <= budget and chinese_ratio(part) >= 0.7 for part in reasoning))
     return {
         "passed": all(checks.values()), "checks": checks,
+        "category": case.get("category", case["suite"]), "strict_json": strict_json,
         "thought_chars": thought_chars,
         "thought_segments": len(reasoning),
         "thought_chinese_ratio": round(chinese_ratio("\n".join(reasoning)), 3) if reasoning else None,
-        "brief_chinese_native_thought": bool(reasoning) and short_thought,
+        "brief_chinese_native_thought": short_thought,
     }
 
 
-def run_case(case, generate):
+def case_steps(case):
     started = time.monotonic()
     messages = list(case["messages"])
     session = ReplaySession(case)
@@ -112,7 +149,7 @@ def run_case(case, generate):
     steps = len(session.steps) + 1
     try:
         for step in range(steps):
-            raw, count, starts_in_thought = generate(messages, tools)
+            raw, count, starts_in_thought = yield messages, tools
             traces.append({"raw": raw, "tokens": count, "prompt_ends_in_thought": starts_in_thought})
             thought, calls, text = split_completion(raw, starts_in_thought=starts_in_thought)
             if thought:
@@ -145,24 +182,60 @@ def run_case(case, generate):
     return {**prediction, **score(case, prediction)}
 
 
+def run_case(case, generate):
+    steps = case_steps(case)
+    request = next(steps)
+    while True:
+        try:
+            request = steps.send(generate(*request))
+        except StopIteration as finished:
+            return finished.value
+
+
+def run_suite(cases, generate_batch, batch_size):
+    for start in range(0, len(cases), batch_size):
+        batch = cases[start:start + batch_size]
+        outcomes = {}
+        pending = [case_steps(case) for case in batch]
+        requests = [(steps, next(steps)) for steps in pending]
+        while requests:
+            responses = generate_batch([request for _, request in requests])
+            remaining = []
+            for (steps, _), response in zip(requests, responses, strict=True):
+                try:
+                    remaining.append((steps, steps.send(response)))
+                except StopIteration as finished:
+                    outcomes[finished.value["id"]] = finished.value
+            requests = remaining
+        yield from (outcomes[case["id"]] for case in batch)
+
+
 def generation_function(model, tokenizer, config, max_new_tokens):
     import torch
 
     stop_ids = tokenizer.convert_tokens_to_ids([TURN_STOP, EOS, TOOL_STOP])
 
-    def generate(messages, tools):
-        prompt = tokenizer.apply_chat_template(messages, tools=tools or None, tokenize=False,
-                                               add_generation_prompt=True, enable_thinking=True)
-        inputs = tokenizer(prompt, add_special_tokens=False, return_tensors="pt").to(model.device)
+    def generate(requests):
+        prompts = [tokenizer.apply_chat_template(messages, tools=tools or None, tokenize=False,
+                                                 add_generation_prompt=True, enable_thinking=True)
+                   for messages, tools in requests]
+        inputs = tokenizer(prompts, add_special_tokens=False, padding=True, padding_side="left",
+                           return_tensors="pt").to(model.device)
         prompt_length = inputs["input_ids"].shape[1]
         if prompt_length > config["max_length"]:
             raise ValueError("Evaluation prompt exceeds configured context budget")
         with torch.inference_mode():
             output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, use_cache=True,
                                     eos_token_id=stop_ids, pad_token_id=tokenizer.pad_token_id)
-        generated = output[0, prompt_length:]
-        raw = tokenizer.decode(generated, skip_special_tokens=False, clean_up_tokenization_spaces=False)
-        return raw, len(generated), prompt.endswith(THOUGHT_START)
+        completions = []
+        for prompt, tail in zip(prompts, output[:, prompt_length:].tolist(), strict=True):
+            for index, token in enumerate(tail):
+                if token in stop_ids:
+                    tail = tail[:index + 1]
+                    break
+            raw = tokenizer.decode(tail, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+            completions.append((raw, len(tail), prompt.endswith(THOUGHT_START)))
+        return completions
 
     return generate
 
@@ -171,7 +244,9 @@ def verify_suite(cases, dataset):
     if not cases or len({case["id"] for case in cases}) != len(cases):
         raise ValueError("Use distinct evaluation case IDs")
     for case in cases:
-        if case["suite"] not in ("dialog", "tool", "initiative") or case["messages"][-1]["role"] != "user":
+        roles = [message["role"] for message in case["messages"]]
+        system_only = case["suite"] == "initiative" and roles == ["system"]
+        if case["suite"] not in ("dialog", "tool", "initiative") or not roles or (roles[-1] != "user" and not system_only):
             raise ValueError("Invalid case kind or missing final input")
         ReplaySession(case)
     report = {"fixture_sha256": digest(cases), "cases": len(cases), "split_overlap_check": None}
@@ -179,6 +254,8 @@ def verify_suite(cases, dataset):
         training_manifest = read_json(dataset / "manifest.json")
         user_turns = {message["content"].strip() for case in cases for message in case["messages"]
                       if message["role"] == "user"}
+        system_only_turns = {case["messages"][0]["content"].strip() for case in cases
+                             if len(case["messages"]) == 1 and case["messages"][0]["role"] == "system"}
         seen, manifest = 0, []
         for split in ("train", "validation", "test"):
             path = dataset / f"{split}.jsonl"
@@ -190,21 +267,37 @@ def verify_suite(cases, dataset):
                 for message in row["messages"]:
                     if message["role"] == "user" and message["content"].strip() in user_turns:
                         raise ValueError("An evaluation turn repeats in the " + split + " split")
+                    if message["role"] == "system" and message["content"].strip() in system_only_turns:
+                        raise ValueError("A system-only evaluation turn repeats in the " + split + " split")
             seen += len(rows)
             manifest.append({"file": path.name, "sha256": sha, "rows": len(rows)})
         report["split_overlap_check"] = {"dataset_manifest_sha256": digest(training_manifest), "rows": seen,
-                                         "splits": manifest, "exact_user_turn_overlap": 0}
+                                         "splits": manifest, "exact_user_turn_overlap": 0, "exact_system_only_turn_overlap": 0}
     return report
 
 
 def summarize(results):
     reasoning = [row["thought_chars"] for row in results if row["native_thoughts"]]
+    checks = {}
+    for key in sorted({key for row in results for key in row["checks"]}):
+        applied = [row["checks"][key] for row in results if key in row["checks"]]
+        checks[key] = {"passed": sum(applied), "total": len(applied)}
+    categories = {}
+    for category in sorted({row.get("category", row["suite"]) for row in results}):
+        group = [row for row in results if row.get("category", row["suite"]) == category]
+        categories[category] = {"passed": sum(row["passed"] for row in group), "total": len(group),
+                                "complete": sum(row["complete"] for row in group),
+                                "brief_chinese_native_thought": sum(row["brief_chinese_native_thought"] for row in group),
+                                "forbidden_reply_matches": sum(not row["checks"]["forbidden_terms_absent"] for row in group)}
     return {
         "passed": sum(row["passed"] for row in results),
         "complete": sum(row["complete"] for row in results),
         "brief_chinese_native_thought": sum(row["brief_chinese_native_thought"] for row in results),
         "native_thought_cases": len(reasoning),
         "native_thought_median_chars": statistics.median(reasoning) if reasoning else None,
+        "strict_json": sum(row.get("strict_json") is True for row in results),
+        "checks": checks,
+        "by_category": categories,
         "median_latency_ms": statistics.median(row["latency_ms"] for row in results),
         "generated_tokens": sum(trace["tokens"] for row in results for trace in row["generations"]),
         "by_suite": {
@@ -224,6 +317,8 @@ def main():
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-new-tokens", type=int, default=384)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--candidate-only", action="store_true", help="Run just the adapter on an already benchmarked suite")
     args = parser.parse_args()
     cases = read_json(args.cases)
     verified = verify_suite(cases, args.dataset)
@@ -232,7 +327,7 @@ def main():
         return
     if not args.config or not args.adapter or not args.output:
         parser.error("Inference requires --config, --adapter and --output")
-    if args.max_new_tokens < 32 or args.output.exists():
+    if args.max_new_tokens < 32 or args.batch_size < 1 or args.output.exists():
         parser.error("Use at least 32 generation tokens and a new output path")
 
     import torch
@@ -269,15 +364,14 @@ def main():
     model = load_base_model(config).eval()
     print("Loaded local base. Starting paired evaluation.", flush=True)
     results = {}
-    for variant in ("baseline", "adapter"):
+    for variant in (("adapter",) if args.candidate_only else ("baseline", "adapter")):
         if variant == "adapter":
             model = PeftModel.from_pretrained(model, args.adapter, is_trainable=False, local_files_only=True).eval()
         generate = generation_function(model, tokenizer, config, args.max_new_tokens)
         results[variant] = []
-        for case in cases:
-            outcome = run_case(case, generate)
+        for outcome in run_suite(cases, generate, args.batch_size):
             results[variant].append(outcome)
-            print(variant, case["id"], "PASS" if outcome["passed"] else "FAIL",
+            print(variant, outcome["id"], "PASS" if outcome["passed"] else "FAIL",
                   sum(trace["tokens"] for trace in outcome["generations"]), "tokens", flush=True)
 
     report = {
@@ -288,12 +382,13 @@ def main():
         "precision": config["precision"], "gpu": torch.cuda.get_device_name(config["device"]),
         "max_new_tokens_per_generation": args.max_new_tokens, "packages": _versions(),
         "enable_thinking": True,
-        "generation": {"do_sample": False, "use_cache": True, "seed": config["seed"], "eos_token_ids": markers},
+        "generation": {"do_sample": False, "use_cache": True, "seed": config["seed"], "eos_token_ids": markers,
+                       "batch_size": args.batch_size},
         "summary": {name: summarize(rows) for name, rows in results.items()},
         "identical_generated_cases": sum(
             left["generations"] == right["generations"]
             for left, right in zip(results["baseline"], results["adapter"], strict=True)
-        ),
+        ) if "baseline" in results else None,
         "observations": results,
     }
     write_json(args.output, report)

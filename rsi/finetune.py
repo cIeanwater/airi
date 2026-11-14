@@ -180,6 +180,10 @@ def inspect_dataset(directory, minimum_groups=10):
     if not isinstance(manifest.get("files"), dict) or set(manifest["files"]) != {"train", "validation", "test"}:
         raise ValueError("Manifest must bind train, validation, and test JSONL files")
     compact = manifest.get("kind") == CHAT_SFT_KIND
+    if compact and "provenance_sha256" in manifest:
+        path = root / "provenance.jsonl"
+        if not path.is_file() or file_hash(path) != manifest["provenance_sha256"]:
+            raise ValueError("Dataset provenance is missing or changed")
     records = manifest.get("records")
     if records is not None or compact:
         if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):

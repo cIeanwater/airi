@@ -1,10 +1,14 @@
 """Exercise tool evidence and loss masks for a revised conversation."""
 
 import copy
+import tempfile
 import unittest
+from pathlib import Path
 
-from rsi.common import digest
+from rsi.common import digest, read_json, read_jsonl, write_jsonl
+from rsi.finetune import inspect_dataset
 from rsi.replay import ReplaySession
+from rsi.rollout import assemble
 from rsi.trajectory import build_trajectory, capture_request, compile_trajectory, replay_receipt
 from rsi.tests.test_episodes import NativeTemplate
 
@@ -94,6 +98,27 @@ class TrajectoryTests(unittest.TestCase):
         record["response"]["choices"][0]["finish_reason"] = "length"
         with self.assertRaisesRegex(ValueError, "completed response"):
             capture_request(record, source_id="capture")
+
+    def test_assembled_manifest_rejects_changed_provenance(self):
+        capture = capture_request(captured(), source_id="capture")
+        capture["messages"][-1].update(reasoning_content="按回执报告窗口。", loss_weight=1)
+        spec = {**capture, "id": "tool-report", "group": "fixture", "kind": "dialogue",
+                "scope": {"user_id": "test", "character_id": "test"},
+                "source_ids": ["capture"], "refinement": {"kind": "test"}}
+        temporary_root = Path(__file__).resolve().parents[1] / "private/test-temp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+            dataset = Path(directory) / "dataset"
+            assemble([spec], NativeTemplate(), 4096, dataset)
+            self.assertIn("provenance_sha256", read_json(dataset / "manifest.json"))
+            _, report = inspect_dataset(dataset)
+            self.assertTrue(report["pilot_ready"])
+            path = dataset / "provenance.jsonl"
+            rows = read_jsonl(path)
+            rows[0]["evidence"][0]["source_id"] = "other-source"
+            write_jsonl(path, rows)
+            with self.assertRaisesRegex(ValueError, "provenance is missing or changed"):
+                inspect_dataset(dataset)
 
 
 if __name__ == "__main__":
