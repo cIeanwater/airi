@@ -217,12 +217,14 @@ def inspect_dataset(directory, minimum_groups=10):
         errors.append("multiple_or_missing_training_scopes")
     if len(groups) < minimum_groups:
         errors.append("insufficient_independent_groups")
+    pilot = False
     if "readiness" in manifest:
         readiness = manifest["readiness"]
         if not isinstance(readiness, dict) or type(readiness.get("ready")) is not bool:
             raise ValueError("Manifest readiness requires an explicit Boolean gate")
         if readiness["ready"] is not True:
             errors.append("source_cleaning_readiness_blocked")
+            pilot = compact and readiness.get("reasons") == ["pilot_without_holdout"]
     if records is not None and not compact:
         expected = {(row["id"], split, row["content_sha256"]) for split, values in splits.items() for row in values}
         supplied = {(row.get("id"), row.get("split"), row.get("content_sha256")) for row in records}
@@ -232,7 +234,10 @@ def inspect_dataset(directory, minimum_groups=10):
         scope = _scope(manifest["scope"])
         if scopes and digest(scope) not in scopes:
             raise ValueError("Manifest scope differs from its records")
-    return splits, {"ready": not errors, "errors": errors, "rows": counts, "independent_groups": len(groups),
+    pilot_allowed_errors = {"empty_split:validation", "empty_split:test", "insufficient_independent_groups",
+                            "source_cleaning_readiness_blocked"}
+    pilot_ready = pilot and not (counts["validation"] or counts["test"]) and not (set(errors) - pilot_allowed_errors)
+    return splits, {"ready": not errors, "pilot_ready": pilot_ready, "errors": errors, "rows": counts, "independent_groups": len(groups),
                     "manifest_sha256": digest(manifest), "files": manifest["files"],
                     "scope": next((row["scope"] for values in splits.values() for row in values), None),
                     "kinds": dict(collections.Counter(row["kind"] for values in splits.values() for row in values)),
@@ -357,18 +362,18 @@ def environment_check(config):
             "weight_manifest": weight_manifest, "weight_error": weights_error}
 
 
-def check(dataset, config):
+def check(dataset, config, *, pilot=False):
     config = configuration(config)
     _, data = inspect_dataset(dataset, config["minimum_groups"])
     environment = environment_check(config)
     scope_match = config.get("scope") is None or data["scope"] == config["scope"]
-    return {"dataset": data, "environment": environment, "scope_matches": scope_match,
+    return {"dataset": data, "environment": environment, "scope_matches": scope_match, "pilot": pilot,
             "ready_for_tokenizer_check": bool(environment["tokenizer_files_present"] and environment["packages"]["transformers"]),
-            "ready_for_training": bool(data["ready"] and environment["ready"] and scope_match),
+            "ready_for_training": bool(data["pilot_ready" if pilot else "ready"] and environment["ready"] and scope_match),
             "training_executed": False}
 
 
-def tokenize(dataset, config, tokenizer=None):
+def tokenize(dataset, config, tokenizer=None, *, pilot=False):
     config = configuration(config)
     splits, data = inspect_dataset(dataset, config["minimum_groups"])
     if tokenizer is None:
@@ -402,15 +407,44 @@ def tokenize(dataset, config, tokenizer=None):
     return encoded, {"dataset": data, "tokenizer_sha256": digest(token_identity), "tokenizer": token_identity, "max_length": config["max_length"],
                      "sequences": {key: len(values) for key, values in encoded.items()}, "rows": lengths, "errors": errors,
                      "target_tokens": {key: sum(sum(t != -100 for t in row["labels"]) for row in values) for key, values in encoded.items()},
-                     "ready_for_training": data["ready"] and not errors and all(encoded.values()), "training_executed": False}
+                     "pilot": pilot, "ready_for_training": not errors and (
+                         data["pilot_ready"] and bool(encoded["train"]) if pilot else data["ready"] and all(encoded.values())
+                     ), "training_executed": False}
 
 
-def train(dataset, config, output, *, adapter=None, resume_checkpoint=None):
+def load_base_model(config):
+    """Load the same local model and precision for training and comparison."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, BitsAndBytesConfig
+
+    dtype = torch.bfloat16 if config["precision"] == "bf16" else torch.float16
+    gemma = read_json(Path(config["model"]) / "config.json").get("model_type") == "gemma4"
+    quantization = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+                                     bnb_4bit_compute_dtype=dtype) if config["method"] == "qlora" else None
+    loader = AutoModelForImageTextToText if gemma else AutoModelForCausalLM
+    return loader.from_pretrained(config["model"], local_files_only=True, trust_remote_code=False,
+                                  dtype=dtype, quantization_config=quantization,
+                                  device_map={"": config["device"]}, attn_implementation="sdpa")
+
+
+def gemma_target_loss(outputs, labels, num_items_in_batch=None):
+    """Apply the causal loss to the same positions selected by the collator."""
+    from torch.nn.functional import cross_entropy
+
+    targets = labels[:, 1:]
+    targets = targets[targets != -100]
+    logits = outputs.logits.float().flatten(0, 1)
+    if num_items_in_batch is None:
+        return cross_entropy(logits, targets)
+    return cross_entropy(logits, targets, reduction="sum") / num_items_in_batch
+
+
+def train(dataset, config, output, *, adapter=None, resume_checkpoint=None, pilot=False):
     config = configuration(config)
-    checked = check(dataset, config)
+    checked = check(dataset, config, pilot=pilot)
     if not checked["ready_for_training"]:
         raise ValueError("Preflight is blocked. Run --check and resolve its reported blockers")
-    encoded, token_report = tokenize(dataset, config)
+    encoded, token_report = tokenize(dataset, config, pilot=pilot)
     if not token_report["ready_for_training"]:
         raise ValueError("Tokenization is blocked. Resolve overlength or template errors without truncation")
     out = Path(output)
@@ -418,7 +452,7 @@ def train(dataset, config, output, *, adapter=None, resume_checkpoint=None):
         raise ValueError("Use a new training output directory")
     import torch
     from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
-    from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer, BitsAndBytesConfig, Trainer, set_seed
+    from transformers import AutoTokenizer, Trainer, set_seed
 
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise ValueError("Selected CUDA training device is unavailable")
@@ -434,6 +468,8 @@ def train(dataset, config, output, *, adapter=None, resume_checkpoint=None):
                "config_sha256": digest(config), "tokenizer_sha256": token_report["tokenizer_sha256"],
                "tokenizer_files": token_report["tokenizer"]["files"],
                "rank": config["rank"], "method": config["method"], "parent_sha256": parent}
+    if pilot:
+        lineage["pilot"] = True
     if adapter:
         previous = read_json(Path(adapter) / "finetune-lineage.json")
         if previous["base"] != identity or previous["scope"] != scope or previous["rank"] != config["rank"] or previous["tokenizer_sha256"] != token_report["tokenizer_sha256"]:
@@ -444,17 +480,14 @@ def train(dataset, config, output, *, adapter=None, resume_checkpoint=None):
             raise ValueError("Resume a Trainer checkpoint inside the same run without another adapter")
         if read_json(out / "finetune-lineage.json") != lineage:
             raise ValueError("Resume configuration, dataset, or base changed")
-    dtype = torch.bfloat16 if config["precision"] == "bf16" else torch.float16
-    gemma = read_json(Path(config["model"]) / "config.json").get("model_type") == "gemma4"
-    quantization = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
-                                     bnb_4bit_compute_dtype=dtype) if config["method"] == "qlora" else None
-    loader = AutoModelForImageTextToText if gemma else AutoModelForCausalLM
     set_seed(config["seed"])
-    model = loader.from_pretrained(config["model"], local_files_only=True, trust_remote_code=False,
-                                   torch_dtype=dtype, quantization_config=quantization,
-                                   device_map={"": config["device"]}, attn_implementation="sdpa")
+    torch.cuda.reset_peak_memory_stats()
+    model = load_base_model(config)
+    gemma = model.config.model_type == "gemma4"
     model.config.use_cache = False
-    if config["method"] == "qlora":
+    # Gemma 4 already computes its RMSNorm in FP32. Keep the large frozen
+    # embedding tables in the configured dtype so they fit on one GPU.
+    if config["method"] == "qlora" and not gemma:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     if adapter:
         model = PeftModel.from_pretrained(model, adapter, is_trainable=True, local_files_only=True)
@@ -476,27 +509,39 @@ def train(dataset, config, output, *, adapter=None, resume_checkpoint=None):
 
     def collate(batch):
         length = max(len(row["input_ids"]) for row in batch)
-        return {key: torch.tensor([row[key] + [pad] * (length - len(row[key])) for row in batch])
-                for key, pad in (("input_ids", tokenizer.pad_token_id), ("attention_mask", 0), ("labels", -100))}
+        tensors = {key: torch.tensor([row[key] + [pad] * (length - len(row[key])) for row in batch])
+                   for key, pad in (("input_ids", tokenizer.pad_token_id), ("attention_mask", 0), ("labels", -100))}
+        if gemma:
+            # Both Trainer batch sizes are one. Project the hidden states
+            # immediately before supervised tokens across the full vocabulary.
+            tensors["logits_to_keep"] = tensors["labels"][0, 1:].ne(-100).nonzero().flatten()
+        return tensors
 
-    args = training_arguments(config, out, len(encoded["train"]))
+    args = training_arguments(config, out, len(encoded["train"]), pilot=pilot)
     out.mkdir(parents=True, exist_ok=True)
     write_json(out / "finetune-lineage.json", lineage)
     write_json(out / "tokenization-report.json", token_report)
-    trainer = Trainer(model=model, args=args, train_dataset=encoded["train"], eval_dataset=encoded["validation"], data_collator=collate)
+    trainer = Trainer(model=model, args=args, train_dataset=encoded["train"],
+                      eval_dataset=encoded["validation"] or None, data_collator=collate,
+                      compute_loss_func=gemma_target_loss if gemma else None)
     started = time.monotonic()
-    trainer.train(resume_from_checkpoint=str(resume_checkpoint) if resume_checkpoint else None)
+    trained = trainer.train(resume_from_checkpoint=str(resume_checkpoint) if resume_checkpoint else None)
     model.save_pretrained(out / "adapter", safe_serialization=True)
     tokenizer.save_pretrained(out / "adapter")
     write_json(out / "adapter/finetune-lineage.json", lineage)
     result = {"training_executed": True, "adapter": str((out / "adapter").resolve()), "adapter_sha256": tree_hash(out / "adapter"),
-              "lineage": lineage, "seconds": time.monotonic() - started, "validation": trainer.evaluate(),
-              "held_out_test": trainer.evaluate(eval_dataset=encoded["test"], metric_key_prefix="test"), "packages": _versions()}
+              "lineage": lineage, "seconds": time.monotonic() - started,
+              "optimizer_steps": trained.global_step, "train_metrics": trained.metrics,
+              "device": torch.cuda.get_device_name(), "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated(),
+              "peak_cuda_reserved_bytes": torch.cuda.max_memory_reserved(),
+              "validation": trainer.evaluate() if encoded["validation"] else None,
+              "held_out_test": trainer.evaluate(eval_dataset=encoded["test"], metric_key_prefix="test") if encoded["test"] else None,
+              "packages": _versions()}
     write_json(out / "training-report.json", result)
     return result
 
 
-def training_arguments(config, output, train_sequences):
+def training_arguments(config, output, train_sequences, *, pilot=False):
     """Build the installed Transformers arguments without loading model weights."""
     from transformers import TrainingArguments
 
@@ -507,9 +552,9 @@ def training_arguments(config, output, train_sequences):
                              gradient_accumulation_steps=config["gradient_accumulation"], optim="adamw_torch",
                              gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
                              bf16=config["precision"] == "bf16", fp16=config["precision"] == "fp16",
-                             eval_strategy="steps" if steps else "epoch", save_strategy="steps" if steps else "epoch",
+                             eval_strategy="no" if pilot else ("steps" if steps else "epoch"), save_strategy="steps" if steps else "epoch",
                              eval_steps=config["save_steps"], save_steps=config["save_steps"], save_total_limit=2,
-                             logging_steps=5, report_to=[], dataloader_num_workers=0, remove_unused_columns=False,
+                             logging_steps=1 if pilot else 5, report_to=[], dataloader_num_workers=0, remove_unused_columns=False,
                              prediction_loss_only=True, warmup_steps=math.floor(total_steps * 0.05), weight_decay=0.01, seed=config["seed"])
 
 
@@ -571,6 +616,7 @@ def main(argv=None):
     parser.add_argument("--adapter")
     parser.add_argument("--resume-from-checkpoint")
     parser.add_argument("--method", choices=["lora", "qlora"])
+    parser.add_argument("--pilot", action="store_true", help="Use a train-only rollout dataset with separately evaluated results")
     args = parser.parse_args(argv)
     config = read_json(args.config)
     if args.method:
@@ -578,17 +624,18 @@ def main(argv=None):
     if args.merge_only:
         if not args.adapter or not args.output:
             parser.error("Merging requires --adapter and a new --output directory")
-        if args.dataset or args.resume_from_checkpoint:
-            parser.error("Merging accepts no dataset or Trainer checkpoint")
+        if args.dataset or args.resume_from_checkpoint or args.pilot:
+            parser.error("Merging accepts no dataset, Trainer checkpoint, or pilot flag")
         report = merge(config, args.adapter, args.output)
     elif not args.dataset:
         parser.error("Checking, tokenization, and training require --dataset")
     elif args.train:
         if not args.output:
             parser.error("Training requires a new --output directory")
-        report = train(args.dataset, config, args.output, adapter=args.adapter, resume_checkpoint=args.resume_from_checkpoint)
+        report = train(args.dataset, config, args.output, adapter=args.adapter,
+                       resume_checkpoint=args.resume_from_checkpoint, pilot=args.pilot)
     elif args.tokenize_only:
-        encoded, report = tokenize(args.dataset, config)
+        encoded, report = tokenize(args.dataset, config, pilot=args.pilot)
         if args.output:
             output = Path(args.output)
             if output.exists():
@@ -597,7 +644,7 @@ def main(argv=None):
                 write_jsonl(output / (split + ".jsonl"), values)
             write_json(output / "tokenization-report.json", report)
     else:
-        report = check(args.dataset, config)
+        report = check(args.dataset, config, pilot=args.pilot)
     if args.report:
         write_json(args.report, report)
     print(json.dumps(report, ensure_ascii=False, allow_nan=False))

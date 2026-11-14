@@ -8,7 +8,8 @@ param(
     [string]$Output,
     [string]$Report,
     [string]$Adapter,
-    [string]$ResumeCheckpoint
+    [string]$ResumeCheckpoint,
+    [switch]$Pilot
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +42,7 @@ try {
     if ($Report) { $arguments += @("--report", $Report) }
     if ($Adapter) { $arguments += @("--adapter", $Adapter) }
     if ($ResumeCheckpoint) { $arguments += @("--resume-from-checkpoint", $ResumeCheckpoint) }
+    if ($Pilot) { $arguments += "--pilot" }
     & $Python @arguments
     if ($LASTEXITCODE -ne 0) { throw "The local training command failed with exit code $LASTEXITCODE." }
 }

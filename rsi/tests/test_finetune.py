@@ -110,6 +110,26 @@ class FinetuneTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Chat row hash changed"):
             inspect_dataset(output, 3)
 
+    def test_train_only_rollout_requires_explicit_pilot_mode(self):
+        self.rows["validation"] = []
+        self.rows["test"] = []
+        output = self.root / "chat"
+        export_chat(self.dataset(), output)
+        manifest = read_json(output / "manifest.json")
+        manifest["readiness"] = {"ready": False, "reasons": ["pilot_without_holdout"]}
+        write_json(output / "manifest.json", manifest)
+
+        _, normal = tokenize(output, self.config, NativeTokenizer())
+        _, pilot = tokenize(output, self.config, NativeTokenizer(), pilot=True)
+        self.assertFalse(normal["ready_for_training"])
+        self.assertTrue(pilot["ready_for_training"])
+        self.assertEqual(pilot["sequences"], {"train": 1, "validation": 0, "test": 0})
+
+        manifest["readiness"]["reasons"].append("content_review_blocked")
+        write_json(output / "manifest.json", manifest)
+        _, blocked = tokenize(output, self.config, NativeTokenizer(), pilot=True)
+        self.assertFalse(blocked["ready_for_training"])
+
     def test_changed_file_is_rejected_before_training(self):
         directory = self.dataset()
         with (directory / "train.jsonl").open("a", encoding="utf-8") as stream:
