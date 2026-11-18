@@ -1,0 +1,25 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "memory",
+      "description": "检索过去实际发生的聊天和观察，返回带时间、说话人及渠道的中文历史记录。认知文档由当前上下文提供，不重复检索。没有找到时说明不确定。",
+      "strict": true,
+      "parameters": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  }
+]

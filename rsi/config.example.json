@@ -1,0 +1,28 @@
+{
+  "actor_scope": { "user_id": "configure-user", "character_id": "configure-character" },
+  "training": {
+    "model": "local-models/gemma4-e2b-it-hf",
+    "device": 0,
+    "qlora": true,
+    "rank": 8,
+    "max_length": 512,
+    "learning_rate": 0.00005,
+    "max_steps": 20,
+    "gradient_accumulation": 16,
+    "seed": 42
+  },
+  "archive": "rsi/private/strategies",
+  "data_instruction": "verified-replay",
+  "rounds_per_day": 1,
+  "plan_origin": "model",
+  "evaluation": {
+    "min_cases": 100,
+    "min_groups": 30,
+    "min_per_slice": 20,
+    "min_groups_per_slice": 10,
+    "required_slices": ["base", "persona", "memory", "tools", "initiative"],
+    "protected_slices": ["base", "memory", "tools"],
+    "target_slices": ["persona", "initiative"],
+    "judges": {}
+  }
+}

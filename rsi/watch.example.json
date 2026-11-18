@@ -1,0 +1,19 @@
+{
+  "actor_scope": { "user_id": "configure-user", "character_id": "configure-character" },
+  "inbox": "rsi/private/inbox",
+  "episodes": "rsi/private/capture",
+  "verifications": "rsi/private/verifications.json",
+  "gaps": "rsi/private/gaps.json",
+  "resources_ready": false,
+  "cooldown_ready": false,
+  "budget_ready": false,
+  "automation": {
+    "enabled": false,
+    "registry": "rsi/private/registry",
+    "runs": "rsi/runs",
+    "cycle_config": "rsi/config.example.json",
+    "plan_template": "rsi/private/plan.json",
+    "suite": "rsi/private/release-suite.json",
+    "character_budget": 12000
+  }
+}
