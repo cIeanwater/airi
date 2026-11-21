@@ -62,6 +62,8 @@ def _check_documents(output, host):
         new = (set(sources) & experiences.keys()) - set(old.get("sources", []))
         if len(sources) != len(set(sources)) or set(sources) - allowed or not new:
             raise ValueError("Consolidation requires an available new source")
+        if sources[0] not in experiences:
+            raise ValueError("The first consolidation source must be an event from the current batch")
         for source_id in new:
             event = experiences[source_id]
             if event.get("cognitionPath", path) != path:

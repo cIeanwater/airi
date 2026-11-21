@@ -46,6 +46,7 @@ class CompanionCorpusTests(unittest.TestCase):
         check({})
         for props, error in [({"expectedRevision": 2}, "version does not match"),
                              ({"sources": ["old"]}, "available new source"),
+                             ({"sources": ["old", "new"]}, "first consolidation source"),
                              ({"sources": ["foreign"]}, "another document")]:
             with self.subTest(props=props), self.assertRaisesRegex(ValueError, error):
                 check(props)
