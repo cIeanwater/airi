@@ -4,7 +4,7 @@ import json
 import re
 
 from .common import digest
-from .host_context import HOST_MARKER, project_host_messages
+from .host_context import HOST_MARKER, project_host_messages, validate_qq_contact
 
 
 ACT = re.compile(r"<\|ACT\s+(\{[^\n]*?\})\|>")
@@ -73,6 +73,7 @@ def _check_documents(output, host):
 def check_companion_spec(spec):
     """Check reasoning, ACT, host policy, and evidence IDs."""
     messages = spec["messages"]
+    validate_qq_contact(messages)
     refinement = spec["refinement"]
     profile = refinement.get("lane", spec["kind"])
     if profile not in {"dialogue", "initiative", "extract", "organize"}:

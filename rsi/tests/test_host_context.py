@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from rsi.common import digest
 from rsi.companion_rollout import clean_messages, refine
-from rsi.host_context import HOST_MARKER, project_host_messages, project_host_tools, runtime_reflection_policy
+from rsi.host_context import HOST_MARKER, project_host_messages, project_host_tools, runtime_reflection_policy, validate_qq_contact
 
 
 def archived(lane, state, *, policy=None, weighted=True):
@@ -16,6 +16,14 @@ def archived(lane, state, *, policy=None, weighted=True):
 
 
 class HostContextTests(unittest.TestCase):
+    def test_qq_sender_binding_in_current_and_archived_prompts(self):
+        header = {"role": "user", "content": "【发送人】联系人甲\n【发送时间】18:41\n我的朋友叫‘联系人乙’。"}
+        for template in ("【会话渠道】QQ 私聊\n对方是{}，稳定人物标识 qq:123。",
+                         "【对话对象认知】\n我和{}正在聊天。\n\n【QQ 回话语气】"):
+            validate_qq_contact([{"role":"system","content":template.format("联系人甲")}, header])
+            with self.assertRaisesRegex(ValueError, "QQ sender differs"):
+                validate_qq_contact([{"role":"system","content":template.format("联系人乙")}, header])
+        validate_qq_contact([{"role":"system","content":"我和联系人乙正在聊天。"}, header])
     def test_actor_input_is_the_exported_training_prefix(self):
         state = {"engagement": {"canSpeak": False}, "channel": "desktop", "conversation": [],
                  "person": {"id": "visitor"}, "videoWatching": False, "now": 300}

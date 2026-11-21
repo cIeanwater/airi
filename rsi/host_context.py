@@ -46,6 +46,29 @@ def runtime_reflection_policy(lane):
     return _read_prompt(PROMPTS / "local-thinking.zh-CN.md") + "\n\n" + _read_prompt(PROMPTS / f"reflection-{lane}.zh-CN.md")
 
 
+def validate_qq_contact(messages):
+    """Reject a single-sender QQ example bound to a different named contact."""
+    if not messages or messages[0].get("role") != "system":
+        return
+    system = messages[0].get("content")
+    if not isinstance(system, str):
+        return
+    owners = re.findall(r"(?m)^【会话渠道】QQ 私聊\r?\n对方是([^，\r\n]+)，稳定人物标识 ", system)
+    if not owners:
+        owners = re.findall(r"(?m)^【对话对象认知】\r?\n我和([^。\r\n]+)正在聊天。\r?$", system)
+    if not owners:
+        return
+    speakers = set()
+    for message in messages:
+        if message.get("role") != "user" or not isinstance(message.get("content"), str):
+            continue
+        sender = re.match(r"【发送人】([^\r\n]+)\r?\n【发送时间】", message["content"])
+        if sender:
+            speakers.add(sender[1].strip())
+    if len(speakers) == 1 and speakers != {name.strip() for name in owners}:
+        raise ValueError("QQ sender differs from the contact bound in the system prompt")
+
+
 def project_host_tools(tools, lane):
     """Return the tools that AIRI exposes to this reflection job."""
     if lane == "dialogue":

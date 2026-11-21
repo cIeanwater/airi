@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .common import digest, file_hash, read_json, read_jsonl, tree_hash, write_json, write_jsonl
 from .dataset import compile_messages
+from .host_context import validate_qq_contact
 
 
 DEFAULTS = {
@@ -129,6 +130,7 @@ def validate_row(row):
             if message.get("status", "finished") != "finished":
                 raise ValueError("Tool result evidence is incomplete")
             receipts.add(call_id)
+    validate_qq_contact(messages)
     indices = row["train_indices"]
     if not isinstance(indices, list) or not indices or any(type(index) is not int for index in indices) or len(set(indices)) != len(indices):
         raise ValueError("Train indices must select unique assistant decisions")
