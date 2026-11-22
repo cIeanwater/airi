@@ -389,9 +389,16 @@ def tokenize(dataset, config, tokenizer=None, *, pilot=False):
     if not tokenizer.chat_template or tokenizer.eos_token_id is None:
         raise ValueError("Tokenizer needs a native chat template and EOS token")
     encoded, lengths, errors = {}, [], []
+    tool_continuations = {}
     for split, rows in splits.items():
         encoded[split] = []
+        coverage = tool_continuations[split] = {"total": 0, "with_call_reasoning": 0, "without_call_reasoning": 0}
         for row in rows:
+            # Parallel receipts share their issuing assistant turn. Match by ID even if results arrive out of order.
+            call_reasoning = {
+                call["id"]: bool((message.get("reasoning_content") or "").strip())
+                for message in row["messages"] for call in message.get("tool_calls", [])
+            }
             for index in row["train_indices"]:
                 detail = {"id": row["id"], "split": split, "target_index": index}
                 try:
@@ -402,6 +409,12 @@ def tokenize(dataset, config, tokenizer=None, *, pilot=False):
                         raise ValueError("sequence_exceeds_configured_context")
                     encoded[split].append(sample)
                     detail["status"] = "accepted"
+                    if index and row.get("template_kwargs", {}).get("enable_thinking") is True:
+                        previous = row["messages"][index - 1]
+                        if previous["role"] == "tool":
+                            present = call_reasoning[previous["tool_call_id"]]
+                            coverage["total"] += 1
+                            coverage["with_call_reasoning" if present else "without_call_reasoning"] += 1
                 except (ValueError, TypeError, KeyError) as error:
                     detail.update(status="rejected", reason=str(error))
                     errors.append(detail)
@@ -412,6 +425,7 @@ def tokenize(dataset, config, tokenizer=None, *, pilot=False):
     token_identity = {"files": token_files, "chat_template_sha256": digest(str(tokenizer.chat_template))}
     return encoded, {"dataset": data, "tokenizer_sha256": digest(token_identity), "tokenizer": token_identity, "max_length": config["max_length"],
                      "sequences": {key: len(values) for key, values in encoded.items()}, "rows": lengths, "errors": errors,
+                     "thinking_tool_continuations": tool_continuations,
                      "target_tokens": {key: sum(sum(t != -100 for t in row["labels"]) for row in values) for key, values in encoded.items()},
                      "pilot": pilot, "ready_for_training": not errors and (
                          data["pilot_ready"] and bool(encoded["train"]) if pilot else data["ready"] and all(encoded.values())

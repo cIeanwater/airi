@@ -259,6 +259,35 @@ class FinetuneTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "result evidence"):
             validate_row(row)
 
+    def test_thinking_tool_continuations_count_issuing_turns_per_split(self):
+        for split, rows in self.rows.items():
+            row = rows[0]
+            row["tools"] = [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+            calls = [{"id": key, "type": "function", "function": {"name": "lookup", "arguments": {}}}
+                     for key in ("first", "second", "third")]
+            row["messages"][2:] = [
+                {"role": "assistant", "content": "", "tool_calls": calls[:2]},
+                {"role": "tool", "content": "second result", "tool_call_id": "second"},
+                {"role": "tool", "content": "first result", "tool_call_id": "first"},
+                {"role": "assistant", "content": "", "tool_calls": calls[2:]},
+                {"role": "tool", "content": "third result", "tool_call_id": "third"},
+                {"role": "assistant", "content": "Answer", "reasoning_content": "Final decision"},
+            ]
+            if split == "train":
+                row["messages"][2]["reasoning_content"] = "Look up both."
+                row["messages"][5]["reasoning_content"] = " "
+            if split != "test":
+                row["template_kwargs"] = {"enable_thinking": True}
+            row["train_indices"] = [2, 5, 7]
+        encoded, report = tokenize(self.dataset(), self.config, NativeTokenizer())
+        self.assertEqual(report["thinking_tool_continuations"], {
+            "train": {"total": 2, "with_call_reasoning": 1, "without_call_reasoning": 1},
+            "validation": {"total": 2, "with_call_reasoning": 0, "without_call_reasoning": 2},
+            "test": {"total": 0, "with_call_reasoning": 0, "without_call_reasoning": 0},
+        })
+        self.assertEqual([len(samples) for samples in encoded.values()], [3, 3, 3])
+        self.assertTrue(report["ready_for_training"])
+
     def test_overlength_reports_full_size_without_truncation(self):
         self.rows["train"][0]["messages"][-1]["content"] = "长" * 300
         encoded, report = tokenize(self.dataset(), {**self.config, "max_length": 128}, NativeTokenizer())
